@@ -6,8 +6,8 @@
   <title>ProShip Orders — ระบบจัดการออเดอร์</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>"/>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet"/>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
@@ -117,42 +117,50 @@ function App(){
   const[viewOrder,setViewOrder]=useState(null);
   const[loading,setLoading]=useState(false);
   const[upsellIds,setUpsellIds]=useState([]);
+  const userRef=useRef(null);
 
-  const notify=useCallback((msg,type="success")=>{setNotif({msg,type});setTimeout(()=>setNotif(null),3500);},[]);
+  function notify(msg,type){setNotif({msg:msg,type:type||"success"});setTimeout(function(){setNotif(null);},3500);}
 
-  // โหลดข้อมูลจาก Google Sheets
-  const loadAccounts=useCallback(async()=>{
-    try{const d=await api("getAccounts");setAccounts(d.accounts||[]);}catch(e){if(e.message==="NO_API")setApiOk(false);}
-  },[]);
+  async function loadAccounts(){
+    try{var d=await api("getAccounts");setAccounts(d.accounts||[]);}catch(e){if(e.message==="NO_API")setApiOk(false);}
+  }
 
-  const loadOrders=useCallback(async()=>{
-    if(!user)return;
+  async function loadOrders(u){
+    var cu=u||userRef.current;
+    if(!cu)return;
     try{
-      const uid=user.role==="admin"?"ALL":user.username;
-      const d=await api("getOrders",{userId:uid});
+      var uid=cu.role==="admin"?"ALL":cu.username;
+      var d=await api("getOrders",{userId:uid});
       setOrders(d.orders||[]);
-    }catch(e){notify("โหลดออเดอร์ผิดพลาด","warning");}
-  },[user,notify]);
+    }catch(e){console.error("loadOrders error",e);}
+  }
 
-  const loadUpsellIds=useCallback(async()=>{
-    try{const d=await api("getUpsellIds");setUpsellIds(d.ids||[]);}catch(e){}
-  },[]);
+  async function loadUpsellIds(){
+    try{var d=await api("getUpsellIds");setUpsellIds(d.ids||[]);}catch(e){}
+  }
 
-  useEffect(function(){if(apiOk)loadAccounts();},[apiOk,loadAccounts]);
-  useEffect(function(){
-    if(!user)return;
-    loadOrders();
-    if(user.role==="admin")loadUpsellIds();
-  },[user]);
+  // โหลดบัญชีเมื่อมี API
+  useEffect(function(){if(apiOk){loadAccounts();}},[apiOk]);
+
+  // เมื่อ Login สำเร็จ → โหลดข้อมูล
+  function handleLogin(acc){
+    userRef.current=acc;
+    setUser(acc);
+    loadOrders(acc);
+    if(acc.role==="admin")loadUpsellIds();
+  }
 
   // ถ้ายังไม่มี API URL → หน้าตั้งค่า
   if(!apiOk)return<SetupScreen onSave={url=>{setApiUrl(url);setApiOk(true);}} />;
   // ถ้ายังไม่ Login
-  if(!user)return<LoginScreen accounts={accounts} onLogin={setUser} onReload={loadAccounts} onSetup={()=>setApiOk(false)} />;
+  if(!user)return<LoginScreen accounts={accounts} onLogin={handleLogin} onReload={loadAccounts} onSetup={function(){setApiOk(false);}} />;
 
-  const isAdmin=user.role==="admin";
-  const filtered=useMemo(()=>{if(!search)return orders;const s=search.toLowerCase();return orders.filter(o=>o.Name?.toLowerCase().includes(s)||String(o.MobileNo)?.includes(s)||o.OrderID?.toLowerCase().includes(s)||o.District?.toLowerCase().includes(s)||o.SalesPerson?.toLowerCase().includes(s)||o.Remark?.toLowerCase().includes(s));},[orders,search]);
-  const stats=useMemo(()=>{const u=orders;return{total:u.length,totalSales:u.reduce((s,o)=>s+(Number(o.SalePrice)||0),0),totalCOD:u.reduce((s,o)=>s+(Number(o.COD)||0),0)};},[orders]);
+  var isAdmin=user.role==="admin";
+  var filtered=orders;
+  if(search){var sl=search.toLowerCase();filtered=orders.filter(function(o){return(o.Name||"").toLowerCase().indexOf(sl)>=0||(String(o.MobileNo||"")).indexOf(sl)>=0||(o.OrderID||"").toLowerCase().indexOf(sl)>=0||(o.District||"").toLowerCase().indexOf(sl)>=0||(o.SalesPerson||"").toLowerCase().indexOf(sl)>=0||(o.Remark||"").toLowerCase().indexOf(sl)>=0;});}
+  var totalSales=0,totalCOD=0;
+  orders.forEach(function(o){totalSales+=Number(o.SalePrice)||0;totalCOD+=Number(o.COD)||0;});
+  var stats={total:orders.length,totalSales:totalSales,totalCOD:totalCOD};
 
   const addOrder=async data=>{
     setLoading(true);
@@ -195,7 +203,7 @@ function App(){
           ))}
         </nav>
         <div style={{padding:"0 12px 8px"}}><button style={{...S.sm,width:"100%",background:"rgba(255,255,255,.06)",color:"#a5b4fc",padding:10}} onClick={loadOrders}>🔄 รีเฟรชข้อมูล</button></div>
-        <button style={S.logoutBtn} onClick={()=>setUser(null)}>🚪 ออกจากระบบ</button>
+        <button style={S.logoutBtn} onClick={function(){userRef.current=null;setUser(null);setOrders([]);setUpsellIds([]);}}>🚪 ออกจากระบบ</button>
       </aside>
 
       <main style={S.main}>
@@ -272,7 +280,7 @@ function LoginScreen({accounts,onLogin,onReload,onSetup}){
   const[error,setError]=useState("");
   const[showPw,setShowPw]=useState(false);
   const ref=useRef(null);
-  const shake=()=>{ref.current?.classList.remove("shake");void ref.current?.offsetWidth;ref.current?.classList.add("shake");};
+  const shake=function(){if(ref.current){ref.current.classList.remove("shake");void ref.current.offsetWidth;ref.current.classList.add("shake");}};
 
   const handleLogin=()=>{
     if(!username||!password){setError("กรุณากรอก Username และ Password");shake();return;}
@@ -294,7 +302,7 @@ function LoginScreen({accounts,onLogin,onReload,onSetup}){
         </div>
         <div style={{marginBottom:20}}>
           <label style={{display:"block",fontSize:13,fontWeight:600,color:"#475569",marginBottom:6}}>👤 Username</label>
-          <input value={username} onChange={e=>{setUsername(e.target.value);setError("");}} onKeyDown={e=>{if(e.key==="Enter")document.getElementById("pw")?.focus();}} placeholder="ชื่อผู้ใช้" autoFocus autoComplete="username"
+          <input value={username} onChange={e=>{setUsername(e.target.value);setError("");}} onKeyDown={e=>{if(e.key==="Enter"){var el=document.getElementById("pw");if(el)el.focus();}}} placeholder="ชื่อผู้ใช้" autoFocus autoComplete="username"
             style={{width:"100%",padding:"12px 16px",borderRadius:12,border:"1.5px solid #e2e8f0",fontSize:15,outline:"none",background:"#fafbff",boxSizing:"border-box"}}/>
         </div>
         <div style={{marginBottom:24}}>
