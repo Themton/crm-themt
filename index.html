@@ -30,7 +30,7 @@ var useEffect = React.useEffect;
 var useRef = React.useRef;
 
 /* ===== API ===== */
-var DEFAULT_API = "https://script.google.com/macros/s/AKfycbyjNgFOvvyMFNlC-zH3OLDnOu1-4ERMCo6CsVPc4HDtKSecbWKosIBL8M2duKKxBV9w6g/exec";
+var DEFAULT_API = "https://script.google.com/macros/s/AKfycbyGXmJn5-_iqLnXsDLS7KVKH7C2z-GxVz_R-sc15SVkl0uNEKf6GcHyfmcZfQQEZFGYXA/exec";
 // ล้าง URL เก่าที่ cache ไว้ ให้ใช้ DEFAULT_API เสมอ
 try { var _old = localStorage.getItem("ps_api"); if(_old && _old !== DEFAULT_API) localStorage.removeItem("ps_api"); } catch(e){}
 function getApiUrl(){ return localStorage.getItem("ps_api") || DEFAULT_API; }
@@ -112,6 +112,7 @@ function App() {
   var [viewOrder, setViewOrder] = _s(null);
   var [loading, setLoading] = _s(false);
   var userRef = useRef(savedUser);
+  var [products, setProducts] = _s([]);
 
   function notify(msg, type) { setNotif({msg:msg,type:type||"success"}); setTimeout(function(){setNotif(null);},3500); }
 
@@ -122,8 +123,11 @@ function App() {
     var u = userRef.current; if(!u) return;
     try { var d = await api("getOrders",{userId:u.role==="admin"?"ALL":u.displayName}); setOrders(d.orders||[]); } catch(e) { console.error(e); }
   }
+  async function loadProducts() {
+    try { var d = await api("getProducts"); setProducts((d.products||[]).filter(function(p){return p.active;})); } catch(e) { console.error(e); }
+  }
 
-  useEffect(function(){ if(apiOk) loadAccounts(); },[apiOk]);
+  useEffect(function(){ if(apiOk){ loadAccounts(); loadProducts(); } },[apiOk]);
 
   // Auto-load orders if already logged in (refresh)
   useEffect(function(){ if(userRef.current) loadOrders(); },[]);
@@ -175,6 +179,8 @@ function App() {
   }
   async function delAcc(u){try{await api("deleteAccount",{username:u});notify("ลบแล้ว","warning");await loadAccounts();}catch(e){notify("ผิดพลาด","warning");}}
   async function resetPw(u,pw){try{await api("resetPassword",null,{username:u,password:pw});notify("รีเซ็ตรหัสผ่านแล้ว");await loadAccounts();}catch(e){notify("ผิดพลาด","warning");}}
+  async function addProduct(d){try{var r=await api("addProduct",null,d);if(r.success){notify("เพิ่มสินค้า "+d.name);await loadProducts();return true;}else{notify(r.error||"ผิดพลาด","warning");return false;}}catch(e){notify(e.message,"warning");return false;}}
+  async function delProduct(name){try{await api("deleteProduct",{name:name});notify("ลบสินค้าแล้ว","warning");await loadProducts();}catch(e){notify("ผิดพลาด","warning");}}
 
   return (
     <div style={S.app}>
@@ -194,9 +200,9 @@ function App() {
       </aside>
 
       <main style={S.main}>
-        {page==="orders" && <OrdersPage orders={filtered} stats={stats} search={search} setSearch={setSearch} showForm={showForm} setShowForm={setShowForm} onAdd={addOrder} onDel={delOrder} user={user} viewOrder={viewOrder} setViewOrder={setViewOrder} isAdmin={isAdmin} loading={loading}/>}
+        {page==="orders" && <OrdersPage orders={filtered} stats={stats} search={search} setSearch={setSearch} showForm={showForm} setShowForm={setShowForm} onAdd={addOrder} onDel={delOrder} user={user} viewOrder={viewOrder} setViewOrder={setViewOrder} isAdmin={isAdmin} loading={loading} products={products}/>}
         {page==="report" && <ReportPage user={user} reportType={reportType} setReportType={setReportType}/>}
-        {page==="team" && isAdmin && <TeamPage accounts={accounts} onAdd={addAcc} onToggle={toggleAcc} onToggleUpsell={toggleUpsell} onSaveUpsellBatch={saveUpsellBatch} onDel={delAcc} onResetPw={resetPw}/>}
+        {page==="team" && isAdmin && <TeamPage accounts={accounts} onAdd={addAcc} onToggle={toggleAcc} onToggleUpsell={toggleUpsell} onSaveUpsellBatch={saveUpsellBatch} onDel={delAcc} onResetPw={resetPw} products={products} onAddProduct={addProduct} onDelProduct={delProduct}/>}
       </main>
     </div>
   );
@@ -259,7 +265,7 @@ function LoginScreen({accounts,onLogin,onReload,onSetup}) {
 }
 
 /* ===== ORDERS PAGE ===== */
-function OrdersPage({orders,stats,search,setSearch,showForm,setShowForm,onAdd,onDel,user,viewOrder,setViewOrder,isAdmin,loading}) {
+function OrdersPage({orders,stats,search,setSearch,showForm,setShowForm,onAdd,onDel,user,viewOrder,setViewOrder,isAdmin,loading,products}) {
   return (
     <div>
       <div style={S.pageHeader}><div><h1 style={S.pageTitle}>📋 ออเดอร์</h1><p style={{fontSize:14,color:"#64748b",margin:"4px 0 0"}}>{user.displayName} — {isAdmin?"ดูทั้งหมด":"ของฉัน"}</p></div><button style={{...S.addBtn,...(showForm?{background:"linear-gradient(135deg,#ef4444,#dc2626)"}:{})}} onClick={function(){setShowForm(!showForm);}}>{showForm?"✕ ปิด":"＋ สร้างออเดอร์"}</button></div>
@@ -268,7 +274,7 @@ function OrdersPage({orders,stats,search,setSearch,showForm,setShowForm,onAdd,on
           <div key={i} style={{...S.statCard,borderLeft:"4px solid "+s.c}}><div style={{fontSize:26}}>{s.i}</div><div><div style={{fontSize:22,fontWeight:800}}>{s.v}</div><div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{s.l}</div></div></div>
         );})}
       </div>
-      {showForm && <OrderForm onSubmit={onAdd} onCancel={function(){setShowForm(false);}} user={user} isAdmin={isAdmin} loading={loading}/>}
+      {showForm && <OrderForm onSubmit={onAdd} onCancel={function(){setShowForm(false);}} user={user} isAdmin={isAdmin} loading={loading} products={products}/>}
       <div style={{display:"flex",gap:12,marginBottom:20}}><div style={S.searchBox}><span>🔍</span><input placeholder="ค้นหา..." value={search} onChange={function(e){setSearch(e.target.value);}} style={S.searchInput}/></div></div>
       {viewOrder && <DetailModal order={viewOrder} onClose={function(){setViewOrder(null);}} onDel={onDel} isAdmin={isAdmin}/>}
       <div style={S.tableWrap}><table style={S.table}>
@@ -294,11 +300,12 @@ function OrdersPage({orders,stats,search,setSearch,showForm,setShowForm,onAdd,on
 }
 
 /* ===== ORDER FORM + UPSELL TOGGLE ===== */
-function OrderForm({onSubmit,onCancel,user,isAdmin,loading}) {
+function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
   var [raw,setRaw] = useState("");
   var [f,setF] = useState({MobileNo:"",Name:"",Address:"",SubDistrict:"",District:"",ZIP:"",CustomerFBLine:"",SalePrice:"",COD:"",Remark:""});
   var [parsed,setParsed] = useState(false);
   var [upsell,setUpsell] = useState(false);
+  var [selectedProduct,setSelectedProduct] = useState("");
 
   function handleText(t) {
     setRaw(t);
@@ -308,8 +315,20 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading}) {
     } else setParsed(false);
   }
   function set(k,v){setF(function(p){var n={};for(var x in p)n[x]=p[x];n[k]=v;return n;});}
+
+  function selectProduct(name) {
+    setSelectedProduct(name);
+    if (!name) return;
+    var prod = (products||[]).find(function(p){return p.name===name;});
+    if (prod) {
+      set("SalePrice", String(prod.price));
+      set("COD", String(prod.price));
+      set("Remark", prod.name + " ปลายทาง");
+    }
+  }
+
   function submit(){if(!f.MobileNo||!f.Name){alert("กรุณากรอกเบอร์มือถือและชื่อลูกค้า");return;}onSubmit({...f, upsell:upsell});}
-  function clear(){setRaw("");setF({MobileNo:"",Name:"",Address:"",SubDistrict:"",District:"",ZIP:"",CustomerFBLine:"",SalePrice:"",COD:"",Remark:""});setParsed(false);setUpsell(false);}
+  function clear(){setRaw("");setF({MobileNo:"",Name:"",Address:"",SubDistrict:"",District:"",ZIP:"",CustomerFBLine:"",SalePrice:"",COD:"",Remark:""});setParsed(false);setUpsell(false);setSelectedProduct("");}
 
   return (
     <div style={{...S.formCard,animation:"slideDown .3s"}}>
@@ -321,17 +340,35 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading}) {
         {parsed && <div style={{padding:"6px 14px",borderRadius:20,background:"#d1fae5",color:"#059669",fontSize:12,fontWeight:700}}>✅ แยกสำเร็จ!</div>}
       </div>
 
-      <div style={{position:"relative"}}><textarea value={raw} onChange={function(e){handleText(e.target.value);}} placeholder={"📋 วางข้อมูลลูกค้าที่นี่...\n\nตัวอย่าง:\nคุณ พอดี พรมประจักษ์\n398 ถนนมหาจักร ป้อมปราบ ป้อมปราบศัตรูพ่าย กทม 10100\n0814400846\nKiso6 (10g) ปลายทาง 449 บาท"} style={{width:"100%",padding:"18px 20px",borderRadius:12,border:"2px dashed #c7d2fe",fontSize:14,lineHeight:1.8,color:"#1e293b",background:parsed?"#f0fdf4":"#fafbff",resize:"vertical",outline:"none",fontFamily:"'Noto Sans Thai',sans-serif",minHeight:120,boxSizing:"border-box"}} rows={5}/>{raw && <button onClick={clear} style={{position:"absolute",top:12,right:12,width:30,height:30,borderRadius:"50%",border:"none",background:"#fee2e2",color:"#ef4444",fontSize:14,cursor:"pointer"}}>✕</button>}</div>
+      <div style={{position:"relative"}}><textarea value={raw} onChange={function(e){handleText(e.target.value);}} placeholder={"📋 วางข้อมูลลูกค้าที่นี่...\n\nตัวอย่าง:\nพอดี พรมประจักษ์\n398 ถนนมหาจักร ป้อมปราบ ป้อมปราบศัตรูพ่าย กทม 10100\n0814400846"} style={{width:"100%",padding:"18px 20px",borderRadius:12,border:"2px dashed #c7d2fe",fontSize:14,lineHeight:1.8,color:"#1e293b",background:parsed?"#f0fdf4":"#fafbff",resize:"vertical",outline:"none",fontFamily:"'Noto Sans Thai',sans-serif",minHeight:120,boxSizing:"border-box"}} rows={5}/>{raw && <button onClick={clear} style={{position:"absolute",top:12,right:12,width:30,height:30,borderRadius:"50%",border:"none",background:"#fee2e2",color:"#ef4444",fontSize:14,cursor:"pointer"}}>✕</button>}</div>
 
       {parsed && <div style={{marginTop:20,animation:"fadeIn .3s"}}>
         <div style={{textAlign:"center",borderBottom:"2px solid #e0e7ff",lineHeight:"0.1em",marginBottom:20}}><span style={{background:"#fff",padding:"0 16px",fontSize:13,fontWeight:700,color:"#6366f1"}}>📋 ตรวจสอบ & แก้ไข</span></div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}><PF i="📱" l="เบอร์ *" v={f.MobileNo} c={function(v){set("MobileNo",v);}}/><PF i="👤" l="ชื่อ *" v={f.Name} c={function(v){set("Name",v);}}/></div>
         <div style={{marginBottom:10}}><PF i="🏠" l="ที่อยู่" v={f.Address} c={function(v){set("Address",v);}}/></div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}><PF i="📍" l="ตำบล" v={f.SubDistrict} c={function(v){set("SubDistrict",v);}}/><PF i="📍" l="อำเภอ" v={f.District} c={function(v){set("District",v);}}/><PF i="📮" l="ปณ." v={f.ZIP} c={function(v){set("ZIP",v);}}/></div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}><PF i="📱" l="FB/Line ลูกค้า" v={f.CustomerFBLine} c={function(v){set("CustomerFBLine",v);}}/><PF i="📝" l="หมายเหตุ/สินค้า" v={f.Remark} c={function(v){set("Remark",v);}}/></div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}><PF i="💰" l="ราคาขาย" v={f.SalePrice} c={function(v){set("SalePrice",v);}}/><PF i="💵" l="ยอด COD" v={f.COD} c={function(v){set("COD",v);}}/></div>
+        <div style={{marginBottom:10}}><PF i="📱" l="FB/Line ลูกค้า" v={f.CustomerFBLine} c={function(v){set("CustomerFBLine",v);}}/></div>
 
-        {/* 🔥 UPSELL TOGGLE — เฉพาะคนที่ได้รับอนุญาต */}
+        {/* 🛒 เลือกสินค้า */}
+        <div style={{marginBottom:12}}>
+          <label style={S.fLabel}>🛒 เลือกสินค้า</label>
+          <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+            {(products||[]).map(function(p){
+              var active = selectedProduct === p.name;
+              return <button key={p.name} type="button" onClick={function(){selectProduct(active?"":p.name);}}
+                style={{padding:"10px 16px",borderRadius:10,border:active?"2px solid #6366f1":"2px solid #e2e8f0",background:active?"#eef2ff":"#fff",color:active?"#6366f1":"#475569",fontSize:13,fontWeight:active?700:500,cursor:"pointer",transition:"all .15s",display:"flex",alignItems:"center",gap:6}}>
+                <span>{p.name}</span>
+                <span style={{fontSize:11,fontWeight:700,color:active?"#6366f1":"#94a3b8"}}>฿{p.price.toLocaleString()}</span>
+              </button>;
+            })}
+            {(products||[]).length===0 && <div style={{fontSize:13,color:"#94a3b8",padding:8}}>ยังไม่มีสินค้า (แอดมินเพิ่มได้ในหน้าจัดการบัญชี)</div>}
+          </div>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}><PF i="💰" l="ราคาขาย" v={f.SalePrice} c={function(v){set("SalePrice",v);}}/><PF i="💵" l="ยอด COD" v={f.COD} c={function(v){set("COD",v);}}/></div>
+        <div style={{marginBottom:16}}><PF i="📝" l="หมายเหตุ" v={f.Remark} c={function(v){set("Remark",v);}}/></div>
+
+        {/* 🔥 UPSELL */}
         {(user.canUpsell || user.role==="admin") && <div onClick={function(){setUpsell(!upsell);}} style={{display:"flex",alignItems:"center",gap:14,padding:"16px 20px",borderRadius:14,border:upsell?"2px solid #ea580c":"2px solid #e2e8f0",background:upsell?"linear-gradient(135deg,#fff7ed,#ffedd5)":"#fafbff",cursor:"pointer",marginBottom:16,transition:"all .2s",userSelect:"none"}}>
           <div style={{width:44,height:26,borderRadius:13,background:upsell?"#ea580c":"#cbd5e1",position:"relative",transition:"background .2s",flexShrink:0}}>
             <div style={{width:22,height:22,borderRadius:11,background:"#fff",position:"absolute",top:2,left:upsell?20:2,transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}/>
@@ -373,14 +410,17 @@ function DetailModal({order,onClose,onDel,isAdmin}) {
 }
 
 /* ===== TEAM ===== */
-function TeamPage({accounts,onAdd,onToggle,onToggleUpsell,onSaveUpsellBatch,onDel,onResetPw}) {
+function TeamPage({accounts,onAdd,onToggle,onToggleUpsell,onSaveUpsellBatch,onDel,onResetPw,products,onAddProduct,onDelProduct}) {
   var [show,setShow] = useState(false);
   var [nf,setNf] = useState({username:"",displayName:"",password:"",role:"user",canUpsell:false});
   var [resetId,setResetId] = useState(null);
   var [newPw,setNewPw] = useState("");
-  // Upsell batch state
-  var [upsellEdit,setUpsellEdit] = useState(null); // null = ไม่ได้แก้, array = กำลังแก้
+  var [upsellEdit,setUpsellEdit] = useState(null);
   var [saving,setSaving] = useState(false);
+  // Product form
+  var [showProd,setShowProd] = useState(false);
+  var [pName,setPName] = useState("");
+  var [pPrice,setPPrice] = useState("");
 
   async function handleAdd(){if(!nf.username||!nf.displayName||!nf.password){alert("กรอกให้ครบ");return;}if(nf.password.length<4){alert("Password อย่างน้อย 4 ตัว");return;}var ok=await onAdd({...nf,active:true});if(ok){setNf({username:"",displayName:"",password:"",role:"user",canUpsell:false});setShow(false);}}
 
@@ -453,6 +493,29 @@ function TeamPage({accounts,onAdd,onToggle,onToggleUpsell,onSaveUpsellBatch,onDe
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* 🛒 PRODUCT MANAGEMENT */}
+      <div style={{background:"#fff",borderRadius:16,padding:24,marginBottom:24,border:"2px solid #a7f3d0",boxShadow:"0 2px 12px rgba(5,150,105,.06)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div><h3 style={{margin:0,fontSize:16,fontWeight:700,color:"#065f46"}}>🛒 จัดการสินค้า</h3><p style={{margin:"4px 0 0",fontSize:13,color:"#94a3b8"}}>เพิ่ม/ลบสินค้า — แสดงเป็นปุ่มให้เลือกตอนสร้างออเดอร์</p></div>
+          <button onClick={function(){setShowProd(!showProd);}} style={{...S.sm,background:"#ecfdf5",color:"#059669",border:"1.5px solid #a7f3d0",padding:"8px 18px",fontSize:13}}>{showProd?"✕ ปิด":"＋ เพิ่มสินค้า"}</button>
+        </div>
+        {showProd && <div style={{display:"grid",gridTemplateColumns:"2fr 1fr auto",gap:10,marginBottom:16,alignItems:"end"}}>
+          <div><label style={S.fLabel}>ชื่อสินค้า</label><input value={pName} onChange={function(e){setPName(e.target.value);}} placeholder="เช่น Kiso (10g)" style={S.pInput}/></div>
+          <div><label style={S.fLabel}>ราคา (บาท)</label><input value={pPrice} onChange={function(e){setPPrice(e.target.value);}} placeholder="399" style={S.pInput}/></div>
+          <button onClick={async function(){if(!pName){alert("กรอกชื่อสินค้า");return;}var ok=await onAddProduct({name:pName,price:pPrice||0});if(ok){setPName("");setPPrice("");setShowProd(false);}}} style={{...S.submitBtn,padding:"10px 20px",fontSize:13,background:"linear-gradient(135deg,#059669,#047857)"}}>✅ เพิ่ม</button>
+        </div>}
+        <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+          {(products||[]).map(function(p){return(
+            <div key={p.name} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",borderRadius:10,background:"#ecfdf5",border:"1.5px solid #a7f3d0"}}>
+              <span style={{fontSize:13,fontWeight:600,color:"#065f46"}}>{p.name}</span>
+              <span style={{fontSize:12,fontWeight:700,color:"#059669"}}>฿{p.price.toLocaleString()}</span>
+              <button onClick={function(){if(confirm("ลบสินค้า "+p.name+" ?"))onDelProduct(p.name);}} style={{width:22,height:22,borderRadius:6,border:"none",background:"#fee2e2",color:"#ef4444",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+            </div>
+          );})}
+          {(products||[]).length===0 && <div style={{fontSize:13,color:"#94a3b8",padding:8}}>ยังไม่มีสินค้า</div>}
         </div>
       </div>
 
