@@ -30,11 +30,521 @@ var useEffect = React.useEffect;
 var useRef = React.useRef;
 
 /* ===== API ===== */
-var DEFAULT_API = "https://script.google.com/macros/s/AKfycbyIafJPEKZScFYfhPdbzlpvZmHHrPITcY5451lIxvwFbNMD_92seBd8DQ-nJiDLPMpiWg/exec";
+var DEFAULT_API = "https://script.google.com/macros/s/AKfycbwiECyzJmQhKfCF382BtkEdnzZar6icug8iiphNzVv15stLdUCytUaLtpFuSHU6kFyNZg/exec";
 function getApiUrl(){ return localStorage.getItem("ps_api") || DEFAULT_API; }
 function setApiUrl(u){ localStorage.setItem("ps_api", u); }
 
 async function api(action, params, body) {
+  var base = getApiUrl();
+  if (!base) throw new Error("NO_API");
+  var url = new URL(base);
+  url.searchParams.set("action", action);
+  if (params) { for (var k in params) url.searchParams.set(k, params[k]); }
+  var opts = { redirect: "follow" };
+  if (body) { opts.method = "POST"; opts.body = JSON.stringify(body); }
+  var res = await fetch(url.toString(), opts);
+  var text = await res.text();
+  var data = JSON.parse(text);
+  if (data && !data.success && data.error) throw new Error(data.error);
+  return data;
+}
+
+/* ===== SMART PARSE ===== */
+function smartParse(t) {
+  t = t.trim(); if (!t) return null;
+  var r = {MobileNo:"",Name:"",Address:"",SubDistrict:"",District:"",ZIP:"",SalePrice:"",COD:"",Remark:""};
+  var pm = t.match(/\b(0[689]\d[\s-]?\d{3,4}[\s-]?\d{4})\b/);
+  if (pm) r.MobileNo = pm[1].replace(/[\s-]/g,"");
+  var zm = t.match(/\b(\d{5})\b/);
+  if (zm) r.ZIP = zm[1];
+  var pp = [/ปลายทาง\s*(\d[\d,]*)\s*(?:บาท)?/i,/(?:COD|cod)\s*[:=]?\s*(\d[\d,]*)/i,/(\d[\d,]*)\s*บาท/];
+  for (var i=0;i<pp.length;i++){var m=t.match(pp[i]);if(m){r.COD=r.SalePrice=m[1].replace(/,/g,"");break;}}
+  var prp = [/(Kiso\S*(?:\s*\([^)]*\))?)/i,/สินค้า\s*[:：]?\s*([^\n]+)/];
+  for (var i=0;i<prp.length;i++){var m=t.match(prp[i]);if(m){r.Remark=m[1].trim()+(t.indexOf("ปลายทาง")>=0?" ปลายทาง":"");break;}}
+  var lines = t.split(/\n/).map(function(l){return l.trim();}).filter(Boolean);
+  var nl = lines.find(function(l){return /^(คุณ|นาย|นาง|น\.?ส\.?|นางสาว)/i.test(l);});
+  if (nl) { var n=nl; if(r.MobileNo) n=n.replace(r.MobileNo,""); r.Name=n.replace(/\d{5}/,"").trim(); }
+  var al = lines.find(function(l){return /\d+[\s/]|ถนน|ซอย|หมู่/.test(l) && l!==r.Name;});
+  if (al) {
+    var rem=al; if(r.ZIP)rem=rem.replace(r.ZIP,"");
+    ["กทม","กรุงเทพมหานคร","กรุงเทพ"].forEach(function(p){rem=rem.replace(p,"");});
+    rem=rem.trim();
+    var sdm=t.match(/(?:ต\.|ตำบล|แขวง)\s*(\S+)/), dm=t.match(/(?:อ\.|อำเภอ|เขต)\s*(\S+)/);
+    if(sdm) r.SubDistrict=sdm[1]; if(dm) r.District=dm[1];
+    if(!r.SubDistrict||!r.District){var pts=rem.split(/\s+/).filter(function(p){return p.length>0;});if(pts.length>=3){var ae=0;for(var i=0;i<pts.length;i++){if(/\d|ถนน|ซอย|หมู่/.test(pts[i]))ae=i+1;}var af=pts.slice(ae);if(!r.SubDistrict&&af.length>=1)r.SubDistrict=af[0];if(!r.District&&af.length>=2)r.District=af[1];r.Address=pts.slice(0,ae).join(" ");}else r.Address=rem;}
+    else{var a=rem;if(r.SubDistrict)a=a.replace(r.SubDistrict,"");if(r.District)a=a.replace(r.District,"");r.Address=a.replace(/(?:ต\.|ตำบล|แขวง|อ\.|อำเภอ|เขต)\s*/g,"").trim();}
+  }
+  return r;
+}
+
+/* ===== MAIN APP ===== */
+function App() {
+  var _s = useState; // shorthand
+  var [apiOk, setApiOk] = _s(!!getApiUrl());
+  // === Session: เก็บ Login ไว้ใน localStorage ===
+  var savedUser = null;
+  try { var raw = localStorage.getItem("ps_user"); if(raw) savedUser = JSON.parse(raw); } catch(e){}
+
+  var [user, setUser] = _s(savedUser);
+  var [accounts, setAccounts] = _s([]);
+  var [orders, setOrders] = _s([]);
+  var [page, setPage] = _s("orders");
+  var [showForm, setShowForm] = _s(false);
+  var [search, setSearch] = _s("");
+  var [reportType, setReportType] = _s("daily");
+  var [notif, setNotif] = _s(null);
+  var [viewOrder, setViewOrder] = _s(null);
+  var [loading, setLoading] = _s(false);
+  var userRef = useRef(savedUser);
+
+  function notify(msg, type) { setNotif({msg:msg,type:type||"success"}); setTimeout(function(){setNotif(null);},3500); }
+
+  async function loadAccounts() {
+    try { var d = await api("getAccounts"); setAccounts(d.accounts||[]); } catch(e) { if(String(e)==="Error: NO_API") setApiOk(false); }
+  }
+  async function loadOrders() {
+    var u = userRef.current; if(!u) return;
+    try { var d = await api("getOrders",{userId:u.role==="admin"?"ALL":u.displayName}); setOrders(d.orders||[]); } catch(e) { console.error(e); }
+  }
+
+  useEffect(function(){ if(apiOk) loadAccounts(); },[apiOk]);
+
+  // Auto-load orders if already logged in (refresh)
+  useEffect(function(){ if(userRef.current) loadOrders(); },[]);
+
+  function doLogin(acc) { userRef.current=acc; setUser(acc); localStorage.setItem("ps_user",JSON.stringify(acc)); loadOrders(); }
+  function doLogout() { userRef.current=null; setUser(null); setOrders([]); localStorage.removeItem("ps_user"); }
+
+  if (!apiOk) return <SetupScreen onSave={function(u){setApiUrl(u);setApiOk(true);}}/>;
+  if (!user) return <LoginScreen accounts={accounts} onLogin={doLogin} onReload={loadAccounts} onSetup={function(){setApiOk(false);}}/>;
+
+  var isAdmin = user.role === "admin";
+  var filtered = orders;
+  if (search) {
+    var sl = search.toLowerCase();
+    filtered = orders.filter(function(o){
+      return (o.Name||"").toLowerCase().indexOf(sl)>=0 || String(o.MobileNo||"").indexOf(sl)>=0 || (o.OrderID||"").toLowerCase().indexOf(sl)>=0 || (o.SalesPerson||"").toLowerCase().indexOf(sl)>=0 || (o.Remark||"").toLowerCase().indexOf(sl)>=0;
+    });
+  }
+  var totalS=0,totalC=0; orders.forEach(function(o){totalS+=Number(o.SalePrice)||0;totalC+=Number(o.COD)||0;});
+  var stats = {total:orders.length, totalSales:totalS, totalCOD:totalC};
+
+  async function addOrder(data) {
+    setLoading(true);
+    try {
+      var payload = {SalesPerson:user.displayName, SalesChannel:"CRM",
+        MobileNo:data.MobileNo, Name:data.Name, Address:data.Address, SubDistrict:data.SubDistrict,
+        District:data.District, ZIP:data.ZIP, CustomerFBLine:data.CustomerFBLine||"",
+        SalePrice:data.SalePrice, COD:data.COD, Remark:data.Remark,
+        upsell: data.upsell ? true : false};
+      var res = await api("addOrder",null,payload);
+      notify("สร้าง " + res.orderId + (data.upsell ? " → 🔥 ส่งไปตาราง Upsell" : " → ส่งไปตาราง Orders"));
+      setShowForm(false);
+      await loadOrders();
+    } catch(e) { notify(e.message,"warning"); }
+    setLoading(false);
+  }
+  async function delOrder(oid) {
+    setLoading(true);
+    try { await api("deleteOrder",{orderId:oid}); notify("ลบสำเร็จ"); setViewOrder(null); await loadOrders(); } catch(e) { notify("ลบผิดพลาด","warning"); }
+    setLoading(false);
+  }
+  async function addAcc(acc) {
+    try { var r=await api("addAccount",null,acc); if(r.success){notify("เพิ่ม "+acc.displayName+" สำเร็จ!");await loadAccounts();return true;}else{notify(r.error||"ผิดพลาด","warning");return false;} } catch(e){notify(e.message,"warning");return false;}
+  }
+  async function toggleAcc(u){try{await api("toggleAccount",{username:u});await loadAccounts();}catch(e){notify("ผิดพลาด","warning");}}
+  async function toggleUpsell(u){try{await api("toggleUpsell",{username:u});await loadAccounts();}catch(e){notify("ผิดพลาด","warning");}}
+  async function saveUpsellBatch(usernames){
+    try{await api("setUpsellBatch",null,{usernames:usernames});notify("บันทึกสิทธิ์ Upsell สำเร็จ (" + usernames.length + " คน)");await loadAccounts();}catch(e){notify("ผิดพลาด","warning");}
+  }
+  async function delAcc(u){try{await api("deleteAccount",{username:u});notify("ลบแล้ว","warning");await loadAccounts();}catch(e){notify("ผิดพลาด","warning");}}
+  async function resetPw(u,pw){try{await api("resetPassword",null,{username:u,password:pw});notify("รีเซ็ตรหัสผ่านแล้ว");await loadAccounts();}catch(e){notify("ผิดพลาด","warning");}}
+
+  return (
+    <div style={S.app}>
+      {notif && <div style={{...S.notif,background:notif.type==="success"?"linear-gradient(135deg,#10b981,#059669)":"linear-gradient(135deg,#f59e0b,#d97706)"}}>{notif.type==="success"?"✅":"⚠️"} {notif.msg}</div>}
+      {loading && <div style={{position:"fixed",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,#6366f1,#8b5cf6)",zIndex:9999}}/>}
+
+      <aside style={S.sidebar}>
+        <div style={S.sidebarHead}><span style={{fontSize:30}}>📦</span><div><div style={{fontSize:20,fontWeight:800,color:"#c7d2fe"}}>ProShip</div><div style={{fontSize:10,color:"#818cf8",letterSpacing:1}}>ORDER MANAGEMENT</div></div></div>
+        <div style={S.userCard}><div style={S.avatar}>{(user.displayName||"?")[0]}</div><div><div style={{fontWeight:700,fontSize:14}}>{user.displayName}</div><div style={{fontSize:11,color:"#a5b4fc"}}>@{user.username}</div><span style={{padding:"2px 8px",borderRadius:6,fontSize:10,fontWeight:700,background:isAdmin?"rgba(250,204,21,.2)":"rgba(129,140,248,.2)",color:isAdmin?"#fbbf24":"#a5b4fc"}}>{isAdmin?"แอดมิน":"พนักงาน"}</span></div></div>
+        <nav style={S.nav}>
+          {[{id:"orders",icon:"📋",label:"ออเดอร์"},{id:"report",icon:"📊",label:"รายงาน"}].concat(isAdmin?[{id:"team",icon:"👥",label:"จัดการบัญชี"}]:[]).map(function(item){return(
+            <button key={item.id} style={{...S.navItem,...(page===item.id?S.navActive:{})}} onClick={function(){setPage(item.id);}}><span style={{fontSize:18}}>{item.icon}</span> {item.label}</button>
+          );})}
+        </nav>
+        <div style={{padding:"0 12px 8px"}}><button style={{...S.sm,width:"100%",background:"rgba(255,255,255,.06)",color:"#a5b4fc",padding:10}} onClick={loadOrders}>🔄 รีเฟรช</button></div>
+        <button style={S.logoutBtn} onClick={doLogout}>🚪 ออกจากระบบ</button>
+      </aside>
+
+      <main style={S.main}>
+        {page==="orders" && <OrdersPage orders={filtered} stats={stats} search={search} setSearch={setSearch} showForm={showForm} setShowForm={setShowForm} onAdd={addOrder} onDel={delOrder} user={user} viewOrder={viewOrder} setViewOrder={setViewOrder} isAdmin={isAdmin} loading={loading}/>}
+        {page==="report" && <ReportPage user={user} reportType={reportType} setReportType={setReportType}/>}
+        {page==="team" && isAdmin && <TeamPage accounts={accounts} onAdd={addAcc} onToggle={toggleAcc} onToggleUpsell={toggleUpsell} onSaveUpsellBatch={saveUpsellBatch} onDel={delAcc} onResetPw={resetPw}/>}
+      </main>
+    </div>
+  );
+}
+
+/* ===== SETUP ===== */
+function SetupScreen({onSave}) {
+  var [url,setUrl] = useState(getApiUrl()||"");
+  var [testing,setTesting] = useState(false);
+  var [error,setError] = useState("");
+  async function test() {
+    if(!url.trim()){setError("กรุณาวาง URL");return;}
+    setTesting(true); setError("");
+    try { var u=new URL(url.trim()); u.searchParams.set("action","getAccounts"); var r=await fetch(u.toString(),{redirect:"follow"}); var d=await r.json(); if(d.success) onSave(url.trim()); else setError("Response ผิดปกติ"); } catch(e){setError("เชื่อมต่อไม่สำเร็จ");}
+    setTesting(false);
+  }
+  return (
+    <div style={S.loginBg}><div style={{...S.loginCard,maxWidth:520}}>
+      <div style={{textAlign:"center",marginBottom:32}}><div style={{fontSize:56,marginBottom:8}}>📦</div><h1 style={{fontSize:26,fontWeight:800,color:"#1e1b4b",margin:"0 0 6px"}}>ProShip Orders</h1><p style={{fontSize:14,color:"#64748b"}}>เชื่อมต่อ Google Sheets</p></div>
+      <div style={{background:"#f8fafc",borderRadius:14,padding:20,marginBottom:20,border:"1px solid #e2e8f0"}}>
+        <h3 style={{fontSize:15,fontWeight:700,marginBottom:12}}>📖 วิธีติดตั้ง</h3>
+        {["สร้าง Google Sheet ใหม่","Extensions > Apps Script → วางโค้ด","Run → initSheet → อนุญาตสิทธิ์","Deploy > Web app > Anyone","คัดลอก URL มาวางด้านล่าง"].map(function(s,i){return(
+          <div key={i} style={{display:"flex",gap:10,alignItems:"center",marginBottom:8}}><div style={{width:24,height:24,borderRadius:"50%",background:"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,flexShrink:0}}>{i+1}</div><div style={{fontSize:13,color:"#334155"}}>{s}</div></div>
+        );})}
+      </div>
+      <label style={{display:"block",fontSize:13,fontWeight:600,color:"#475569",marginBottom:6}}>🔗 URL</label>
+      <input value={url} onChange={function(e){setUrl(e.target.value);setError("");}} placeholder="https://script.google.com/macros/s/xxxxx/exec" style={{...S.pInput,marginBottom:12,padding:"12px 16px",fontSize:14}}/>
+      {error && <div style={{background:"#fef2f2",color:"#dc2626",padding:"10px 14px",borderRadius:10,fontSize:13,fontWeight:600,marginBottom:12,border:"1px solid #fecaca"}}>❌ {error}</div>}
+      <button onClick={test} disabled={testing} style={{width:"100%",padding:14,borderRadius:12,border:"none",background:testing?"#94a3b8":"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>{testing?"⏳ ทดสอบ...":"🔗 เชื่อมต่อ"}</button>
+    </div></div>
+  );
+}
+
+/* ===== LOGIN ===== */
+function LoginScreen({accounts,onLogin,onReload,onSetup}) {
+  var [username,setUsername] = useState("");
+  var [password,setPassword] = useState("");
+  var [error,setError] = useState("");
+  var [showPw,setShowPw] = useState(false);
+  var ref = useRef(null);
+  function shake(){if(ref.current){ref.current.classList.remove("shake");void ref.current.offsetWidth;ref.current.classList.add("shake");}}
+  function go() {
+    if(!username||!password){setError("กรอก Username และ Password");shake();return;}
+    var acc=accounts.find(function(a){return a.username===username;});
+    if(!acc){setError("ไม่พบ Username");shake();return;}
+    if(!acc.active){setError("บัญชีถูกระงับ");shake();return;}
+    if(acc.password!==password){setError("Password ไม่ถูกต้อง");shake();return;}
+    onLogin(acc);
+  }
+  return (
+    <div style={S.loginBg}><div ref={ref} style={S.loginCard}>
+      <div style={{textAlign:"center",marginBottom:36}}><div style={{fontSize:56,marginBottom:8}}>📦</div><h1 style={{fontSize:28,fontWeight:800,color:"#1e1b4b",margin:"0 0 6px"}}>ProShip Orders</h1><p style={{fontSize:14,color:"#64748b"}}>Google Sheets CRM</p><div style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:8,padding:"4px 12px",borderRadius:8,background:"#d1fae5",color:"#059669",fontSize:12,fontWeight:600}}>🟢 เชื่อมต่อแล้ว</div></div>
+      <div style={{marginBottom:20}}><label style={S.fLabel}>👤 Username</label><input value={username} onChange={function(e){setUsername(e.target.value);setError("");}} onKeyDown={function(e){if(e.key==="Enter"){var el=document.getElementById("pw");if(el)el.focus();}}} placeholder="ชื่อผู้ใช้" autoFocus style={{...S.pInput,padding:"12px 16px",fontSize:15}}/></div>
+      <div style={{marginBottom:24}}><label style={S.fLabel}>🔒 Password</label><div style={{position:"relative"}}><input id="pw" type={showPw?"text":"password"} value={password} onChange={function(e){setPassword(e.target.value);setError("");}} onKeyDown={function(e){if(e.key==="Enter")go();}} placeholder="รหัสผ่าน" style={{...S.pInput,padding:"12px 48px 12px 16px",fontSize:15}}/><button onClick={function(){setShowPw(!showPw);}} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",border:"none",background:"none",cursor:"pointer",fontSize:18,color:"#94a3b8"}}>{showPw?"🙈":"👁"}</button></div></div>
+      {error && <div style={{background:"#fef2f2",color:"#dc2626",padding:"10px 14px",borderRadius:10,fontSize:13,fontWeight:600,marginBottom:16,border:"1px solid #fecaca"}}>❌ {error}</div>}
+      <button onClick={go} style={{width:"100%",padding:14,borderRadius:12,border:"none",background:"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer",marginBottom:16}}>เข้าสู่ระบบ</button>
+      <div style={{display:"flex",gap:8,justifyContent:"center"}}><button onClick={onReload} style={{...S.sm,background:"#f1f5f9",color:"#64748b"}}>🔄 โหลดบัญชี</button><button onClick={onSetup} style={{...S.sm,background:"#f1f5f9",color:"#64748b"}}>⚙️ เปลี่ยน URL</button></div>
+    </div></div>
+  );
+}
+
+/* ===== ORDERS PAGE ===== */
+function OrdersPage({orders,stats,search,setSearch,showForm,setShowForm,onAdd,onDel,user,viewOrder,setViewOrder,isAdmin,loading}) {
+  return (
+    <div>
+      <div style={S.pageHeader}><div><h1 style={S.pageTitle}>📋 ออเดอร์</h1><p style={{fontSize:14,color:"#64748b",margin:"4px 0 0"}}>{user.displayName} — {isAdmin?"ดูทั้งหมด":"ของฉัน"}</p></div><button style={{...S.addBtn,...(showForm?{background:"linear-gradient(135deg,#ef4444,#dc2626)"}:{})}} onClick={function(){setShowForm(!showForm);}}>{showForm?"✕ ปิด":"＋ สร้างออเดอร์"}</button></div>
+      <div style={{display:"flex",gap:14,marginBottom:24,flexWrap:"wrap"}}>
+        {[{l:"ทั้งหมด",v:stats.total,c:"#6366f1",i:"📦"},{l:"ยอดขาย",v:"฿"+stats.totalSales.toLocaleString(),c:"#10b981",i:"💰"},{l:"ยอด COD",v:"฿"+stats.totalCOD.toLocaleString(),c:"#f59e0b",i:"💵"},{l:"เฉลี่ย",v:stats.total?"฿"+Math.round(stats.totalSales/stats.total).toLocaleString():"฿0",c:"#8b5cf6",i:"📈"}].map(function(s,i){return(
+          <div key={i} style={{...S.statCard,borderLeft:"4px solid "+s.c}}><div style={{fontSize:26}}>{s.i}</div><div><div style={{fontSize:22,fontWeight:800}}>{s.v}</div><div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{s.l}</div></div></div>
+        );})}
+      </div>
+      {showForm && <OrderForm onSubmit={onAdd} onCancel={function(){setShowForm(false);}} user={user} isAdmin={isAdmin} loading={loading}/>}
+      <div style={{display:"flex",gap:12,marginBottom:20}}><div style={S.searchBox}><span>🔍</span><input placeholder="ค้นหา..." value={search} onChange={function(e){setSearch(e.target.value);}} style={S.searchInput}/></div></div>
+      {viewOrder && <DetailModal order={viewOrder} onClose={function(){setViewOrder(null);}} onDel={onDel} isAdmin={isAdmin}/>}
+      <div style={S.tableWrap}><table style={S.table}>
+        <thead><tr>{["เลขออเดอร์","วันที่","ลูกค้า","เบอร์","อำเภอ","พนักงาน","ราคา","COD","หมายเหตุ"].map(function(h,i){return <th key={i} style={S.th}>{h}</th>;})}</tr></thead>
+        <tbody>{orders.length===0
+          ? <tr><td colSpan={9} style={{textAlign:"center",padding:60,color:"#94a3b8"}}><div style={{fontSize:48,marginBottom:8}}>📭</div>{loading?"กำลังโหลด...":"ไม่พบออเดอร์"}</td></tr>
+          : orders.map(function(o){return(
+            <tr key={o.OrderID} style={{cursor:"pointer",transition:"background .15s"}} onClick={function(){setViewOrder(o);}} onMouseEnter={function(e){e.currentTarget.style.background="#f8fafc";}} onMouseLeave={function(e){e.currentTarget.style.background="";}}>
+              <td style={S.td}><span style={S.oid}>{o.OrderID}</span></td>
+              <td style={S.td}><div style={{fontSize:13,fontWeight:600}}>{String(o.Timestamp||"").split(" ")[0]}</div><div style={{fontSize:11,color:"#94a3b8"}}>{String(o.Timestamp||"").split(" ")[1]}</div></td>
+              <td style={{...S.td,fontWeight:600}}>{o.Name}</td>
+              <td style={{...S.td,fontSize:12}}>{o.MobileNo}</td>
+              <td style={{...S.td,fontSize:12,color:"#64748b"}}>{o.District}</td>
+              <td style={S.td}><span style={{padding:"3px 8px",borderRadius:6,fontSize:11,fontWeight:600,background:"#f0fdf4",color:"#059669"}}>{o.SalesPerson}</span></td>
+              <td style={{...S.td,fontWeight:700}}>฿{Number(o.SalePrice||0).toLocaleString()}</td>
+              <td style={S.td}>฿{Number(o.COD||0).toLocaleString()}</td>
+              <td style={{...S.td,fontSize:12,color:"#64748b",maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.Remark}</td>
+            </tr>);})
+        }</tbody>
+      </table></div>
+    </div>
+  );
+}
+
+/* ===== ORDER FORM + UPSELL TOGGLE ===== */
+function OrderForm({onSubmit,onCancel,user,isAdmin,loading}) {
+  var [raw,setRaw] = useState("");
+  var [f,setF] = useState({MobileNo:"",Name:"",Address:"",SubDistrict:"",District:"",ZIP:"",CustomerFBLine:"",SalePrice:"",COD:"",Remark:""});
+  var [parsed,setParsed] = useState(false);
+  var [upsell,setUpsell] = useState(false);
+
+  function handleText(t) {
+    setRaw(t);
+    if (t.trim().length > 8) {
+      var r = smartParse(t);
+      if (r) { setF(function(p){var n={};for(var k in p)n[k]=r[k]||p[k];return n;}); setParsed(true); }
+    } else setParsed(false);
+  }
+  function set(k,v){setF(function(p){var n={};for(var x in p)n[x]=p[x];n[k]=v;return n;});}
+  function submit(){if(!f.MobileNo||!f.Name){alert("กรุณากรอกเบอร์มือถือและชื่อลูกค้า");return;}onSubmit({...f, upsell:upsell});}
+  function clear(){setRaw("");setF({MobileNo:"",Name:"",Address:"",SubDistrict:"",District:"",ZIP:"",CustomerFBLine:"",SalePrice:"",COD:"",Remark:""});setParsed(false);setUpsell(false);}
+
+  return (
+    <div style={{...S.formCard,animation:"slideDown .3s"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+        <div>
+          <h3 style={{margin:0,fontSize:18,fontWeight:800}}>🧠 Smart Paste <span style={{fontSize:11,fontWeight:600,color:"#818cf8",background:"#eef2ff",padding:"2px 8px",borderRadius:6}}>วางแล้วแยกอัตโนมัติ</span></h3>
+          <p style={{margin:"6px 0 0",fontSize:13,color:"#64748b"}}>พนักงาน: <b style={{color:"#6366f1"}}>{user.displayName}</b> • ช่องทาง: <b style={{color:"#6366f1"}}>CRM</b></p>
+        </div>
+        {parsed && <div style={{padding:"6px 14px",borderRadius:20,background:"#d1fae5",color:"#059669",fontSize:12,fontWeight:700}}>✅ แยกสำเร็จ!</div>}
+      </div>
+
+      <div style={{position:"relative"}}><textarea value={raw} onChange={function(e){handleText(e.target.value);}} placeholder={"📋 วางข้อมูลลูกค้าที่นี่...\n\nตัวอย่าง:\nคุณ พอดี พรมประจักษ์\n398 ถนนมหาจักร ป้อมปราบ ป้อมปราบศัตรูพ่าย กทม 10100\n0814400846\nKiso6 (10g) ปลายทาง 449 บาท"} style={{width:"100%",padding:"18px 20px",borderRadius:12,border:"2px dashed #c7d2fe",fontSize:14,lineHeight:1.8,color:"#1e293b",background:parsed?"#f0fdf4":"#fafbff",resize:"vertical",outline:"none",fontFamily:"'Noto Sans Thai',sans-serif",minHeight:120,boxSizing:"border-box"}} rows={5}/>{raw && <button onClick={clear} style={{position:"absolute",top:12,right:12,width:30,height:30,borderRadius:"50%",border:"none",background:"#fee2e2",color:"#ef4444",fontSize:14,cursor:"pointer"}}>✕</button>}</div>
+
+      {parsed && <div style={{marginTop:20,animation:"fadeIn .3s"}}>
+        <div style={{textAlign:"center",borderBottom:"2px solid #e0e7ff",lineHeight:"0.1em",marginBottom:20}}><span style={{background:"#fff",padding:"0 16px",fontSize:13,fontWeight:700,color:"#6366f1"}}>📋 ตรวจสอบ & แก้ไข</span></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}><PF i="📱" l="เบอร์ *" v={f.MobileNo} c={function(v){set("MobileNo",v);}}/><PF i="👤" l="ชื่อ *" v={f.Name} c={function(v){set("Name",v);}}/></div>
+        <div style={{marginBottom:10}}><PF i="🏠" l="ที่อยู่" v={f.Address} c={function(v){set("Address",v);}}/></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}><PF i="📍" l="ตำบล" v={f.SubDistrict} c={function(v){set("SubDistrict",v);}}/><PF i="📍" l="อำเภอ" v={f.District} c={function(v){set("District",v);}}/><PF i="📮" l="ปณ." v={f.ZIP} c={function(v){set("ZIP",v);}}/></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}><PF i="📱" l="FB/Line ลูกค้า" v={f.CustomerFBLine} c={function(v){set("CustomerFBLine",v);}}/><PF i="📝" l="หมายเหตุ/สินค้า" v={f.Remark} c={function(v){set("Remark",v);}}/></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}><PF i="💰" l="ราคาขาย" v={f.SalePrice} c={function(v){set("SalePrice",v);}}/><PF i="💵" l="ยอด COD" v={f.COD} c={function(v){set("COD",v);}}/></div>
+
+        {/* 🔥 UPSELL TOGGLE — เฉพาะคนที่ได้รับอนุญาต */}
+        {(user.canUpsell || user.role==="admin") && <div onClick={function(){setUpsell(!upsell);}} style={{display:"flex",alignItems:"center",gap:14,padding:"16px 20px",borderRadius:14,border:upsell?"2px solid #ea580c":"2px solid #e2e8f0",background:upsell?"linear-gradient(135deg,#fff7ed,#ffedd5)":"#fafbff",cursor:"pointer",marginBottom:16,transition:"all .2s",userSelect:"none"}}>
+          <div style={{width:44,height:26,borderRadius:13,background:upsell?"#ea580c":"#cbd5e1",position:"relative",transition:"background .2s",flexShrink:0}}>
+            <div style={{width:22,height:22,borderRadius:11,background:"#fff",position:"absolute",top:2,left:upsell?20:2,transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}/>
+          </div>
+          <div>
+            <div style={{fontSize:15,fontWeight:700,color:upsell?"#c2410c":"#64748b"}}>🔥 UPSELL</div>
+            <div style={{fontSize:12,color:upsell?"#ea580c":"#94a3b8"}}>{upsell?"ข้อมูลจะส่งไปตาราง Upsell เท่านั้น":"ข้อมูลจะส่งไปตาราง Orders ปกติ"}</div>
+          </div>
+        </div>}
+
+        <div style={{display:"flex",gap:12,justifyContent:"flex-end"}}>
+          <button style={S.cancelBtn} onClick={onCancel}>ยกเลิก</button>
+          <button style={{...S.submitBtn,...(upsell?{background:"linear-gradient(135deg,#ea580c,#c2410c)"}:{})}} onClick={submit} disabled={loading}>
+            {loading ? "⏳ กำลังบันทึก..." : upsell ? "🔥 ส่งไป Upsell" : "✅ ส่งไป Orders"}
+          </button>
+        </div>
+      </div>}
+
+      {!parsed && <div style={{marginTop:14,textAlign:"center"}}><button onClick={function(){setParsed(true);}} style={{background:"none",border:"none",color:"#6366f1",fontWeight:600,cursor:"pointer",fontSize:13}}>✏️ กรอกเองทีละช่อง</button></div>}
+    </div>
+  );
+}
+
+function PF({i,l,v,c}){return <div><label style={S.fLabel}>{i} {l}</label><input value={v||""} onChange={function(e){c(e.target.value);}} style={{...S.pInput,borderColor:v?"#a5b4fc":"#e2e8f0",background:v?"#eef2ff":"#fff"}}/></div>;}
+
+/* ===== DETAIL MODAL ===== */
+function DetailModal({order,onClose,onDel,isAdmin}) {
+  var o = order;
+  return (
+    <div style={S.modalOverlay} onClick={onClose}><div style={{...S.modalCard,animation:"popIn .2s"}} onClick={function(e){e.stopPropagation();}}>
+      <div style={{display:"flex",justifyContent:"space-between",padding:"24px 28px 16px",borderBottom:"1px solid #f1f5f9"}}><div><h2 style={{fontSize:20,fontWeight:800,margin:0,fontFamily:"'JetBrains Mono',monospace",color:"#6366f1"}}>{o.OrderID}</h2><div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>{o.Timestamp} • {o.SalesPerson}</div></div><button onClick={onClose} style={S.closeBtn}>✕</button></div>
+      <div style={{padding:"20px 28px"}}>
+        <Sec t="👤 ลูกค้า"><DR l="ชื่อ" v={o.Name}/><DR l="เบอร์" v={o.MobileNo}/><DR l="ที่อยู่" v={(o.Address||"")+" "+(o.SubDistrict||"")+" "+(o.District||"")+" "+(o.ZIP||"")}/>{o.CustomerFBLine && <DR l="FB/Line" v={o.CustomerFBLine}/>}</Sec>
+        <Sec t="💳 การขาย"><DR l="ช่องทาง" v="CRM"/><DR l="ราคา" v={"฿"+Number(o.SalePrice||0).toLocaleString()} hl/><DR l="COD" v={"฿"+Number(o.COD||0).toLocaleString()} hl/>{o.Remark && <DR l="หมายเหตุ" v={o.Remark}/>}</Sec>
+      </div>
+      {isAdmin && <div style={{padding:"16px 28px 24px",borderTop:"1px solid #f1f5f9",display:"flex",justifyContent:"flex-end"}}><button onClick={function(){if(confirm("ลบ?"))onDel(o.OrderID);}} style={{padding:"10px 20px",borderRadius:10,border:"none",background:"#fef2f2",color:"#ef4444",fontSize:13,fontWeight:600,cursor:"pointer"}}>🗑 ลบ</button></div>}
+    </div></div>
+  );
+}
+
+/* ===== TEAM ===== */
+function TeamPage({accounts,onAdd,onToggle,onToggleUpsell,onSaveUpsellBatch,onDel,onResetPw}) {
+  var [show,setShow] = useState(false);
+  var [nf,setNf] = useState({username:"",displayName:"",password:"",role:"user",canUpsell:false});
+  var [resetId,setResetId] = useState(null);
+  var [newPw,setNewPw] = useState("");
+  // Upsell batch state
+  var [upsellEdit,setUpsellEdit] = useState(null); // null = ไม่ได้แก้, array = กำลังแก้
+  var [saving,setSaving] = useState(false);
+
+  async function handleAdd(){if(!nf.username||!nf.displayName||!nf.password){alert("กรอกให้ครบ");return;}if(nf.password.length<4){alert("Password อย่างน้อย 4 ตัว");return;}var ok=await onAdd({...nf,active:true});if(ok){setNf({username:"",displayName:"",password:"",role:"user",canUpsell:false});setShow(false);}}
+
+  function startUpsellEdit(){
+    var current = [];
+    accounts.forEach(function(a){ if(a.canUpsell) current.push(a.username); });
+    setUpsellEdit(current);
+  }
+  function toggleUE(username){
+    setUpsellEdit(function(prev){
+      if(prev.indexOf(username)>=0) return prev.filter(function(u){return u!==username;});
+      else return prev.concat([username]);
+    });
+  }
+  async function saveUE(){
+    setSaving(true);
+    await onSaveUpsellBatch(upsellEdit);
+    setSaving(false);
+    setUpsellEdit(null);
+  }
+
+  var admins=accounts.filter(function(a){return a.role==="admin";}); var users=accounts.filter(function(a){return a.role==="user";});
+
+  return (
+    <div>
+      <div style={S.pageHeader}><div><h1 style={S.pageTitle}>👥 จัดการบัญชี</h1></div><button style={S.addBtn} onClick={function(){setShow(!show);}}>{show?"✕ ปิด":"＋ เพิ่มบัญชี"}</button></div>
+
+      {/* Add Account Form */}
+      {show && <div style={{...S.formCard,animation:"slideDown .3s"}}><h3 style={{margin:"0 0 16px",fontSize:16,fontWeight:700}}>➕ สร้างบัญชีใหม่</h3>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+          <div><label style={S.fLabel}>🆔 Username</label><input value={nf.username} onChange={function(e){setNf({...nf,username:e.target.value});}} style={S.pInput}/></div>
+          <div><label style={S.fLabel}>👤 ชื่อ</label><input value={nf.displayName} onChange={function(e){setNf({...nf,displayName:e.target.value});}} style={S.pInput}/></div>
+          <div><label style={S.fLabel}>🔒 Password</label><input type="password" value={nf.password} onChange={function(e){setNf({...nf,password:e.target.value});}} style={S.pInput}/></div>
+          <div><label style={S.fLabel}>🏷 บทบาท</label><select value={nf.role} onChange={function(e){setNf({...nf,role:e.target.value});}} style={S.pInput}><option value="user">พนักงาน</option><option value="admin">แอดมิน</option></select></div>
+        </div>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:10}}><button style={S.cancelBtn} onClick={function(){setShow(false);}}>ยกเลิก</button><button style={S.submitBtn} onClick={handleAdd}>✅ สร้าง</button></div>
+      </div>}
+
+      {/* Reset PW Modal */}
+      {resetId && <div style={S.modalOverlay} onClick={function(){setResetId(null);}}><div style={{background:"#fff",borderRadius:16,padding:28,width:"100%",maxWidth:400}} onClick={function(e){e.stopPropagation();}}><h3 style={{margin:"0 0 16px",fontSize:16,fontWeight:700}}>🔑 รีเซ็ต PW — @{resetId}</h3><input type="password" value={newPw} onChange={function(e){setNewPw(e.target.value);}} placeholder="Password ใหม่" style={{...S.pInput,marginBottom:16}}/><div style={{display:"flex",gap:10,justifyContent:"flex-end"}}><button style={S.cancelBtn} onClick={function(){setResetId(null);}}>ยกเลิก</button><button style={S.submitBtn} onClick={function(){if(newPw.length<4){alert("อย่างน้อย 4 ตัว");return;}onResetPw(resetId,newPw);setResetId(null);setNewPw("");}}>บันทึก</button></div></div></div>}
+
+      {/* 🔥 UPSELL SETTINGS — เลือกหลายคนพร้อมกัน กดบันทึกทีเดียว */}
+      <div style={{background:"#fff",borderRadius:16,padding:24,marginBottom:24,border:"2px solid #fed7aa",boxShadow:"0 2px 12px rgba(234,88,12,.08)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div>
+            <h3 style={{margin:0,fontSize:16,fontWeight:700,color:"#c2410c"}}>🔥 สิทธิ์ Upsell</h3>
+            <p style={{margin:"4px 0 0",fontSize:13,color:"#94a3b8"}}>เลือกบัญชีที่อนุญาตใช้ Upsell — กดบันทึกทีเดียว</p>
+          </div>
+          {upsellEdit===null
+            ? <button onClick={startUpsellEdit} style={{...S.sm,background:"#fff7ed",color:"#ea580c",border:"1.5px solid #fdba74",padding:"8px 18px",fontSize:13}}>✏️ แก้ไข</button>
+            : <div style={{display:"flex",gap:8}}>
+                <button onClick={function(){setUpsellEdit(null);}} style={{...S.sm,background:"#f1f5f9",color:"#64748b"}}>ยกเลิก</button>
+                <button onClick={saveUE} disabled={saving} style={{...S.sm,background:"linear-gradient(135deg,#ea580c,#c2410c)",color:"#fff",padding:"8px 20px",fontSize:13,borderRadius:10,boxShadow:"0 2px 8px rgba(234,88,12,.3)"}}>{saving?"⏳ บันทึก...":"💾 บันทึก"}</button>
+              </div>
+          }
+        </div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+          {accounts.map(function(a){
+            var isOn = upsellEdit!==null ? upsellEdit.indexOf(a.username)>=0 : a.canUpsell;
+            var editing = upsellEdit!==null;
+            return (
+              <div key={a.username}
+                onClick={editing ? function(){toggleUE(a.username);} : undefined}
+                style={{display:"flex",alignItems:"center",gap:10,padding:"10px 16px",borderRadius:10,border:isOn?"2px solid #ea580c":"2px solid #e2e8f0",background:isOn?"#fff7ed":"#fafbff",cursor:editing?"pointer":"default",userSelect:"none",transition:"all .15s",opacity:a.active?1:.5}}>
+                <div style={{width:20,height:20,borderRadius:6,border:isOn?"2px solid #ea580c":"2px solid #cbd5e1",background:isOn?"#ea580c":"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:"#fff",flexShrink:0}}>{isOn?"✓":""}</div>
+                <div>
+                  <div style={{fontSize:13,fontWeight:600,color:isOn?"#c2410c":"#64748b"}}>{a.displayName||a.username}</div>
+                  <div style={{fontSize:10,color:"#94a3b8"}}>@{a.username} • {a.role==="admin"?"แอดมิน":"พนักงาน"}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Account Cards */}
+      <h3 style={{fontSize:15,fontWeight:700,color:"#475569",marginBottom:12}}>👑 แอดมิน ({admins.length})</h3>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12,marginBottom:24}}>{admins.map(function(a){return <AccCard key={a.username} a={a} onReset={setResetId} prot/>;})}</div>
+      <h3 style={{fontSize:15,fontWeight:700,color:"#475569",marginBottom:12}}>📞 พนักงาน ({users.length})</h3>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>{users.map(function(a){return <AccCard key={a.username} a={a} onToggle={onToggle} onDel={onDel} onReset={setResetId}/>;})}</div>
+    </div>
+  );
+}
+function AccCard({a,onToggle,onDel,onReset,prot}){return(
+  <div style={{background:"#fff",borderRadius:14,padding:18,border:"2px solid "+(a.active?"#e0e7ff":"#fee2e2"),opacity:a.active?1:.6}}>
+    <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+      <div style={{width:44,height:44,borderRadius:"50%",background:"#eef2ff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:800,color:"#6366f1"}}>{(a.displayName||"?")[0]}</div>
+      <div style={{flex:1}}>
+        <div style={{fontWeight:700,fontSize:14}}>{a.displayName||""}</div>
+        <div style={{fontSize:11,color:"#94a3b8"}}>@{a.username}</div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
+        <div style={{padding:"3px 8px",borderRadius:6,fontSize:10,fontWeight:700,background:a.active?"#d1fae5":"#fee2e2",color:a.active?"#059669":"#ef4444"}}>{a.active?"ใช้งาน":"ระงับ"}</div>
+        {a.canUpsell && <div style={{padding:"2px 6px",borderRadius:4,fontSize:9,fontWeight:700,background:"#fff7ed",color:"#ea580c"}}>🔥 Upsell</div>}
+      </div>
+    </div>
+    <div style={{display:"flex",gap:6}}>
+      <button onClick={function(){onReset(a.username);}} style={{...S.sm,flex:1,background:"#eef2ff",color:"#6366f1"}}>🔑 PW</button>
+      {!prot && <React.Fragment>
+        <button onClick={function(){onToggle(a.username);}} style={{...S.sm,flex:1,background:a.active?"#fef3c7":"#d1fae5",color:a.active?"#d97706":"#059669"}}>{a.active?"⏸ ระงับ":"▶️ เปิด"}</button>
+        <button onClick={function(){if(confirm("ลบ?"))onDel(a.username);}} style={{...S.sm,background:"#fee2e2",color:"#ef4444"}}>🗑</button>
+      </React.Fragment>}
+    </div>
+  </div>
+);}
+
+/* ===== REPORT ===== */
+function ReportPage({user,reportType,setReportType}) {
+  var [data,setData] = useState([]);
+  var [summary,setSummary] = useState({totalOrders:0,totalSales:0,totalCOD:0});
+  var [loading,setLoading] = useState(true);
+  useEffect(function(){
+    setLoading(true);
+    var uid = user.role==="admin"?"ALL":user.displayName;
+    api("getSalesReport",{type:reportType,userId:uid}).then(function(r){setData(r.report||[]);setSummary(r.summary||{});setLoading(false);}).catch(function(){setLoading(false);});
+  },[reportType]);
+  var mx = 1; data.forEach(function(d){if(d.totalSales>mx)mx=d.totalSales;});
+  return (
+    <div>
+      <div style={S.pageHeader}><div><h1 style={S.pageTitle}>📊 รายงานยอดขาย</h1></div><div style={{display:"flex",gap:6}}>{["daily","monthly"].map(function(t){return <button key={t} onClick={function(){setReportType(t);}} style={{padding:"10px 18px",borderRadius:10,border:"1px solid #e2e8f0",fontSize:13,fontWeight:600,cursor:"pointer",background:reportType===t?"#6366f1":"#fff",color:reportType===t?"#fff":"#64748b"}}>{t==="daily"?"📅 รายวัน":"📆 รายเดือน"}</button>;})}</div></div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:16,marginBottom:24}}>
+        {[{i:"📦",l:"ออเดอร์",v:summary.totalOrders,c:"#6366f1"},{i:"💰",l:"ยอดขาย",v:"฿"+(summary.totalSales||0).toLocaleString(),c:"#10b981"},{i:"💵",l:"COD",v:"฿"+(summary.totalCOD||0).toLocaleString(),c:"#f59e0b"},{i:"📈",l:"เฉลี่ย",v:summary.totalOrders?"฿"+Math.round(summary.totalSales/summary.totalOrders).toLocaleString():"฿0",c:"#8b5cf6"}].map(function(s,i){return <div key={i} style={{padding:24,borderRadius:16,border:"1px solid "+s.c+"33",background:"linear-gradient(135deg,"+s.c+"08,"+s.c+"15)",textAlign:"center"}}><div style={{fontSize:32}}>{s.i}</div><div style={{fontSize:26,fontWeight:800,color:s.c,margin:"8px 0 4px"}}>{s.v}</div><div style={{fontSize:13,color:"#64748b"}}>{s.l}</div></div>;})}
+      </div>
+      <div style={{background:"#fff",borderRadius:16,padding:24,marginBottom:24}}>
+        {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>⏳ โหลด...</div>:data.slice(0,14).map(function(d){return(
+          <div key={d.date} style={{display:"flex",alignItems:"center",gap:12,marginBottom:8}}><div style={{width:90,fontSize:12,fontWeight:600,color:"#475569",textAlign:"right",flexShrink:0}}>{d.date}</div><div style={{flex:1,height:28,background:"#f1f5f9",borderRadius:8,overflow:"hidden"}}><div style={{height:"100%",width:(d.totalSales/mx)*100+"%",background:"linear-gradient(90deg,#6366f1,#8b5cf6)",borderRadius:8,minWidth:4}}/></div><div style={{width:130,fontSize:12,fontWeight:600,flexShrink:0}}>฿{d.totalSales.toLocaleString()} ({d.orders})</div></div>
+        );})}
+      </div>
+      <div style={S.tableWrap}><table style={S.table}><thead><tr>{["วันที่","ออเดอร์","ยอดขาย","COD","พนักงาน"].map(function(h,i){return <th key={i} style={S.th}>{h}</th>;})}</tr></thead><tbody>{data.map(function(d){return(
+        <tr key={d.date}><td style={{...S.td,fontWeight:600}}>{d.date}</td><td style={S.td}>{d.orders}</td><td style={{...S.td,fontWeight:700,color:"#6366f1"}}>฿{d.totalSales.toLocaleString()}</td><td style={S.td}>฿{d.totalCOD.toLocaleString()}</td><td style={S.td}><div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{d.people&&Object.keys(d.people).map(function(p){return <span key={p} style={{padding:"2px 8px",borderRadius:4,background:"#f0fdf4",fontSize:11,color:"#059669",fontWeight:600}}>{p}:{d.people[p]}</span>;})}</div></td></tr>
+      );})}</tbody></table></div>
+    </div>
+  );
+}
+
+/* ===== SHARED ===== */
+function Sec({t,children}){return <div style={{marginBottom:24}}><h4 style={{fontSize:14,fontWeight:700,color:"#475569",margin:"0 0 12px",paddingBottom:8,borderBottom:"1px solid #f1f5f9"}}>{t}</h4><div style={{display:"flex",flexDirection:"column",gap:10}}>{children}</div></div>;}
+function DR({l,v,hl}){return <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:13,color:"#94a3b8"}}>{l}</span><span style={{fontSize:13,fontWeight:hl?700:500,color:hl?"#6366f1":"#1e293b",textAlign:"right",maxWidth:"65%"}}>{v}</span></div>;}
+
+/* ===== STYLES ===== */
+var S = {
+  app:{display:"flex",minHeight:"100vh",fontFamily:"'Noto Sans Thai',sans-serif",background:"#f0f2f7",color:"#1e293b"},
+  sidebar:{width:250,background:"linear-gradient(180deg,#1e1b4b,#312e81)",color:"#fff",display:"flex",flexDirection:"column",flexShrink:0,position:"sticky",top:0,height:"100vh",overflowY:"auto"},
+  sidebarHead:{display:"flex",alignItems:"center",gap:12,padding:"24px 20px 16px",borderBottom:"1px solid rgba(255,255,255,.08)"},
+  userCard:{display:"flex",alignItems:"center",gap:12,padding:"14px 18px",margin:"12px 12px 0",background:"rgba(255,255,255,.06)",borderRadius:12},
+  avatar:{width:40,height:40,borderRadius:"50%",background:"linear-gradient(135deg,#6366f1,#8b5cf6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:800,color:"#fff"},
+  nav:{display:"flex",flexDirection:"column",gap:4,padding:"20px 12px",flex:1},
+  navItem:{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",borderRadius:10,border:"none",background:"transparent",color:"#c7d2fe",fontSize:14,fontWeight:500,cursor:"pointer",textAlign:"left"},
+  navActive:{background:"rgba(255,255,255,.12)",color:"#fff",fontWeight:700},
+  logoutBtn:{margin:"0 12px 20px",padding:12,border:"none",borderRadius:10,background:"rgba(239,68,68,.15)",color:"#fca5a5",fontSize:13,fontWeight:600,cursor:"pointer"},
+  main:{flex:1,padding:"28px 32px",overflowY:"auto",maxHeight:"100vh"},
+  pageHeader:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:24,flexWrap:"wrap",gap:12},
+  pageTitle:{fontSize:26,fontWeight:800,margin:0,letterSpacing:-.5},
+  addBtn:{padding:"12px 24px",borderRadius:12,border:"none",background:"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 14px rgba(99,102,241,.35)"},
+  statCard:{flex:"1 1 150px",display:"flex",alignItems:"center",gap:14,padding:"16px 18px",background:"#fff",borderRadius:14,boxShadow:"0 1px 4px rgba(0,0,0,.04)"},
+  searchBox:{display:"flex",alignItems:"center",gap:8,padding:"10px 16px",background:"#fff",borderRadius:10,border:"1px solid #e2e8f0",flex:"1 1 250px"},
+  searchInput:{border:"none",outline:"none",flex:1,fontSize:14,color:"#1e293b",background:"transparent"},
+  tableWrap:{background:"#fff",borderRadius:14,overflow:"auto",boxShadow:"0 1px 4px rgba(0,0,0,.04)"},
+  table:{width:"100%",borderCollapse:"collapse",fontSize:13},
+  th:{padding:14,textAlign:"left",fontWeight:700,fontSize:11,color:"#64748b",background:"#f8fafc",borderBottom:"2px solid #e2e8f0",textTransform:"uppercase",letterSpacing:.5,whiteSpace:"nowrap"},
+  td:{padding:14,borderBottom:"1px solid #f1f5f9",verticalAlign:"middle"},
+  oid:{fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:600,color:"#6366f1",background:"#eef2ff",padding:"3px 8px",borderRadius:6,whiteSpace:"nowrap"},
+  formCard:{background:"#fff",borderRadius:16,padding:28,marginBottom:24,boxShadow:"0 4px 24px rgba(99,102,241,.1)",border:"2px solid #e0e7ff"},
+  fLabel:{fontSize:11,fontWeight:600,color:"#64748b",display:"block",marginBottom:4},
+  pInput:{width:"100%",padding:"9px 12px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:13,color:"#1e293b",outline:"none",boxSizing:"border-box",background:"#fff"},
+  cancelBtn:{padding:"10px 20px",borderRadius:10,border:"1px solid #e2e8f0",background:"#fff",color:"#64748b",fontSize:14,fontWeight:600,cursor:"pointer"},
+  submitBtn:{padding:"12px 28px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 14px rgba(99,102,241,.3)"},
+  sm:{padding:"6px 14px",borderRadius:8,border:"none",fontSize:12,fontWeight:600,cursor:"pointer"},
+  modalOverlay:{position:"fixed",inset:0,background:"rgba(15,23,42,.6)",backdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20},
+  modalCard:{background:"#fff",borderRadius:20,width:"100%",maxWidth:560,maxHeight:"90vh",overflow:"auto",boxShadow:"0 25px 60px rgba(0,0,0,.2)"},
+  closeBtn:{width:36,height:36,borderRadius:"50%",border:"none",background:"#f1f5f9",color:"#475569",fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"},
+  loginBg:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,#1e1b4b 0%,#312e81 40%,#4338ca 100%)",padding:20},
+  loginCard:{background:"rgba(255,255,255,.97)",borderRadius:24,padding:"40px 36px",width:"100%",maxWidth:420,boxShadow:"0 25px 60px rgba(0,0,0,.3)"},
+  notif:{position:"fixed",top:20,right:20,padding:"14px 24px",borderRadius:14,color:"#fff",fontWeight:600,fontSize:14,zIndex:2000,boxShadow:"0 8px 30px rgba(0,0,0,.2)",display:"flex",alignItems:"center",gap:8,animation:"slideDown .3s"},
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>async function api(action, params, body) {
   var base = getApiUrl();
   if (!base) throw new Error("NO_API");
   var url = new URL(base);
