@@ -30,7 +30,8 @@ var useEffect = React.useEffect;
 var useRef = React.useRef;
 
 /* ===== API ===== */
-function getApiUrl(){ return localStorage.getItem("ps_api") || ""; }
+var DEFAULT_API = "https://script.google.com/macros/s/AKfycbyIafJPEKZScFYfhPdbzlpvZmHHrPITcY5451lIxvwFbNMD_92seBd8DQ-nJiDLPMpiWg/exec";
+function getApiUrl(){ return localStorage.getItem("ps_api") || DEFAULT_API; }
 function setApiUrl(u){ localStorage.setItem("ps_api", u); }
 
 async function api(action, params, body) {
@@ -99,7 +100,7 @@ function App() {
   }
   async function loadOrders() {
     var u = userRef.current; if(!u) return;
-    try { var d = await api("getOrders",{userId:u.role==="admin"?"ALL":u.username}); setOrders(d.orders||[]); } catch(e) { console.error(e); }
+    try { var d = await api("getOrders",{userId:u.role==="admin"?"ALL":u.displayName}); setOrders(d.orders||[]); } catch(e) { console.error(e); }
   }
 
   useEffect(function(){ if(apiOk) loadAccounts(); },[apiOk]);
@@ -124,9 +125,10 @@ function App() {
   async function addOrder(data) {
     setLoading(true);
     try {
-      var payload = {UserID:user.username, SalesPerson:user.displayName, SalesChannel:"CRM",
+      var payload = {SalesPerson:user.displayName, SalesChannel:"CRM",
         MobileNo:data.MobileNo, Name:data.Name, Address:data.Address, SubDistrict:data.SubDistrict,
-        District:data.District, ZIP:data.ZIP, SalePrice:data.SalePrice, COD:data.COD, Remark:data.Remark,
+        District:data.District, ZIP:data.ZIP, CustomerFBLine:data.CustomerFBLine||"",
+        SalePrice:data.SalePrice, COD:data.COD, Remark:data.Remark,
         upsell: data.upsell ? true : false};
       var res = await api("addOrder",null,payload);
       notify("สร้าง " + res.orderId + (data.upsell ? " → 🔥 ส่งไปตาราง Upsell" : " → ส่งไปตาราง Orders"));
@@ -268,7 +270,7 @@ function OrdersPage({orders,stats,search,setSearch,showForm,setShowForm,onAdd,on
 /* ===== ORDER FORM + UPSELL TOGGLE ===== */
 function OrderForm({onSubmit,onCancel,user,isAdmin,loading}) {
   var [raw,setRaw] = useState("");
-  var [f,setF] = useState({MobileNo:"",Name:"",Address:"",SubDistrict:"",District:"",ZIP:"",SalePrice:"",COD:"",Remark:""});
+  var [f,setF] = useState({MobileNo:"",Name:"",Address:"",SubDistrict:"",District:"",ZIP:"",CustomerFBLine:"",SalePrice:"",COD:"",Remark:""});
   var [parsed,setParsed] = useState(false);
   var [upsell,setUpsell] = useState(false);
 
@@ -281,7 +283,7 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading}) {
   }
   function set(k,v){setF(function(p){var n={};for(var x in p)n[x]=p[x];n[k]=v;return n;});}
   function submit(){if(!f.MobileNo||!f.Name){alert("กรุณากรอกเบอร์มือถือและชื่อลูกค้า");return;}onSubmit({...f, upsell:upsell});}
-  function clear(){setRaw("");setF({MobileNo:"",Name:"",Address:"",SubDistrict:"",District:"",ZIP:"",SalePrice:"",COD:"",Remark:""});setParsed(false);setUpsell(false);}
+  function clear(){setRaw("");setF({MobileNo:"",Name:"",Address:"",SubDistrict:"",District:"",ZIP:"",CustomerFBLine:"",SalePrice:"",COD:"",Remark:""});setParsed(false);setUpsell(false);}
 
   return (
     <div style={{...S.formCard,animation:"slideDown .3s"}}>
@@ -300,8 +302,8 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading}) {
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}><PF i="📱" l="เบอร์ *" v={f.MobileNo} c={function(v){set("MobileNo",v);}}/><PF i="👤" l="ชื่อ *" v={f.Name} c={function(v){set("Name",v);}}/></div>
         <div style={{marginBottom:10}}><PF i="🏠" l="ที่อยู่" v={f.Address} c={function(v){set("Address",v);}}/></div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}><PF i="📍" l="ตำบล" v={f.SubDistrict} c={function(v){set("SubDistrict",v);}}/><PF i="📍" l="อำเภอ" v={f.District} c={function(v){set("District",v);}}/><PF i="📮" l="ปณ." v={f.ZIP} c={function(v){set("ZIP",v);}}/></div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}><PF i="💰" l="ราคาขาย" v={f.SalePrice} c={function(v){set("SalePrice",v);}}/><PF i="💵" l="ยอด COD" v={f.COD} c={function(v){set("COD",v);}}/></div>
-        <div style={{marginBottom:16}}><PF i="📝" l="หมายเหตุ/สินค้า" v={f.Remark} c={function(v){set("Remark",v);}}/></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}><PF i="📱" l="FB/Line ลูกค้า" v={f.CustomerFBLine} c={function(v){set("CustomerFBLine",v);}}/><PF i="📝" l="หมายเหตุ/สินค้า" v={f.Remark} c={function(v){set("Remark",v);}}/></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}><PF i="💰" l="ราคาขาย" v={f.SalePrice} c={function(v){set("SalePrice",v);}}/><PF i="💵" l="ยอด COD" v={f.COD} c={function(v){set("COD",v);}}/></div>
 
         {/* 🔥 UPSELL TOGGLE — เฉพาะคนที่ได้รับอนุญาต */}
         {(user.canUpsell || user.role==="admin") && <div onClick={function(){setUpsell(!upsell);}} style={{display:"flex",alignItems:"center",gap:14,padding:"16px 20px",borderRadius:14,border:upsell?"2px solid #ea580c":"2px solid #e2e8f0",background:upsell?"linear-gradient(135deg,#fff7ed,#ffedd5)":"#fafbff",cursor:"pointer",marginBottom:16,transition:"all .2s",userSelect:"none"}}>
@@ -336,7 +338,7 @@ function DetailModal({order,onClose,onDel,isAdmin}) {
     <div style={S.modalOverlay} onClick={onClose}><div style={{...S.modalCard,animation:"popIn .2s"}} onClick={function(e){e.stopPropagation();}}>
       <div style={{display:"flex",justifyContent:"space-between",padding:"24px 28px 16px",borderBottom:"1px solid #f1f5f9"}}><div><h2 style={{fontSize:20,fontWeight:800,margin:0,fontFamily:"'JetBrains Mono',monospace",color:"#6366f1"}}>{o.OrderID}</h2><div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>{o.Timestamp} • {o.SalesPerson}</div></div><button onClick={onClose} style={S.closeBtn}>✕</button></div>
       <div style={{padding:"20px 28px"}}>
-        <Sec t="👤 ลูกค้า"><DR l="ชื่อ" v={o.Name}/><DR l="เบอร์" v={o.MobileNo}/><DR l="ที่อยู่" v={(o.Address||"")+" "+(o.SubDistrict||"")+" "+(o.District||"")+" "+(o.ZIP||"")}/></Sec>
+        <Sec t="👤 ลูกค้า"><DR l="ชื่อ" v={o.Name}/><DR l="เบอร์" v={o.MobileNo}/><DR l="ที่อยู่" v={(o.Address||"")+" "+(o.SubDistrict||"")+" "+(o.District||"")+" "+(o.ZIP||"")}/>{o.CustomerFBLine && <DR l="FB/Line" v={o.CustomerFBLine}/>}</Sec>
         <Sec t="💳 การขาย"><DR l="ช่องทาง" v="CRM"/><DR l="ราคา" v={"฿"+Number(o.SalePrice||0).toLocaleString()} hl/><DR l="COD" v={"฿"+Number(o.COD||0).toLocaleString()} hl/>{o.Remark && <DR l="หมายเหตุ" v={o.Remark}/>}</Sec>
       </div>
       {isAdmin && <div style={{padding:"16px 28px 24px",borderTop:"1px solid #f1f5f9",display:"flex",justifyContent:"flex-end"}}><button onClick={function(){if(confirm("ลบ?"))onDel(o.OrderID);}} style={{padding:"10px 20px",borderRadius:10,border:"none",background:"#fef2f2",color:"#ef4444",fontSize:13,fontWeight:600,cursor:"pointer"}}>🗑 ลบ</button></div>}
@@ -412,7 +414,7 @@ function ReportPage({user,reportType,setReportType}) {
   var [loading,setLoading] = useState(true);
   useEffect(function(){
     setLoading(true);
-    var uid = user.role==="admin"?"ALL":user.username;
+    var uid = user.role==="admin"?"ALL":user.displayName;
     api("getSalesReport",{type:reportType,userId:uid}).then(function(r){setData(r.report||[]);setSummary(r.summary||{});setLoading(false);}).catch(function(){setLoading(false);});
   },[reportType]);
   var mx = 1; data.forEach(function(d){if(d.totalSales>mx)mx=d.totalSales;});
