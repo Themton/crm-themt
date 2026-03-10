@@ -526,7 +526,7 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
       var shortName = name.replace(/^\[[^\]]+\]\s*/,"");
       set("SalePrice", String(prod.price));
       if (!isTransfer) set("COD", String(prod.price));
-      set("Remark", shortName + " ปลายทาง");
+      set("Remark", shortName + (isTransfer ? " โอนเงิน" : " ปลายทาง"));
     }
   }
 
@@ -612,6 +612,12 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
           setIsTransfer(next);
           if(next){ set("COD","0"); }
           else { setSlipPreview(null); }
+          // อัพเดทหมายเหตุถ้าเลือกสินค้าอยู่
+          if(selectedProduct){
+            var shortName=selectedProduct.replace(/^\[[^\]]+\]\s*/,"");
+            set("Remark", shortName + (next?" โอนเงิน":" ปลายทาง"));
+            if(!next){var prod=(products||[]).find(function(p){return p.name===selectedProduct;});if(prod)set("COD",String(prod.price));}
+          }
         }} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 18px",borderRadius:12,border:isTransfer?"2px solid #2563eb":"2px solid #e2e8f0",background:isTransfer?"#eff6ff":"#fafbff",cursor:"pointer",marginBottom:12,userSelect:"none",transition:"all .2s"}}>
           <div style={{width:44,height:26,borderRadius:13,background:isTransfer?"#2563eb":"#cbd5e1",position:"relative",transition:"background .2s",flexShrink:0}}>
             <div style={{width:22,height:22,borderRadius:11,background:"#fff",position:"absolute",top:2,left:isTransfer?20:2,transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}/>
