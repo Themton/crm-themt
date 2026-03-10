@@ -334,10 +334,20 @@ function LoginScreen({accounts,onLogin,onReload,onSetup}) {
 
 /* ===== ORDERS PAGE ===== */
 function OrdersPage({orders,stats,search,setSearch,showForm,setShowForm,onAdd,onDel,onUploadSlip,user,viewOrder,setViewOrder,isAdmin,loading,products}) {
-  var [slipFull,setSlipFull] = useState(null); // URL ของสลิปที่กดดูเต็มจอ
+  var [slipFull,setSlipFull] = useState(null);
+  var [pg,setPg] = useState(1);
+  var perPage = 50;
+
+  // Reset หน้าเมื่อค้นหาหรือข้อมูลเปลี่ยน
+  useEffect(function(){ setPg(1); },[search,orders.length]);
+
+  var totalPages = Math.max(1, Math.ceil(orders.length / perPage));
+  var startIdx = (pg - 1) * perPage;
+  var pageOrders = orders.slice(startIdx, startIdx + perPage);
+
   return (
     <div>
-      <div style={S.pageHeader}><div><h1 style={S.pageTitle}>📋 ออเดอร์</h1><p style={{fontSize:14,color:"#64748b",margin:"4px 0 0"}}>{user.displayName} — {isAdmin?"ดูทั้งหมด":"ของฉัน"}</p></div><button style={{...S.addBtn,...(showForm?{background:"linear-gradient(135deg,#ef4444,#dc2626)"}:{})}} onClick={function(){setShowForm(!showForm);}}>{showForm?"✕ ปิด":"＋ สร้างออเดอร์"}</button></div>
+      <div style={S.pageHeader}><div><h1 style={S.pageTitle}>📋 ออเดอร์</h1><p style={{fontSize:14,color:"#64748b",margin:"4px 0 0"}}>{user.displayName} — {isAdmin?"ดูทั้งหมด":"ของฉัน"} • {orders.length} รายการ</p></div><button style={{...S.addBtn,...(showForm?{background:"linear-gradient(135deg,#ef4444,#dc2626)"}:{})}} onClick={function(){setShowForm(!showForm);}}>{showForm?"✕ ปิด":"＋ สร้างออเดอร์"}</button></div>
       <div style={{display:"flex",gap:14,marginBottom:24,flexWrap:"wrap"}}>
         {[{l:"ทั้งหมด",v:stats.total,c:"#d97706",i:"📦"},{l:"ยอดขายรวม",v:"฿"+stats.totalSales.toLocaleString(),c:"#10b981",i:"💰"},{l:"COD",v:"฿"+stats.totalCOD.toLocaleString(),c:"#f59e0b",i:"📦"},{l:"โอนเงิน",v:"฿"+stats.totalNonCOD.toLocaleString(),c:"#2563eb",i:"💳"}].map(function(s,i){return(
           <div key={i} style={{...S.statCard,borderLeft:"4px solid "+s.c}}><div style={{fontSize:26}}>{s.i}</div><div><div style={{fontSize:22,fontWeight:800}}>{s.v}</div><div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{s.l}</div></div></div>
@@ -348,9 +358,9 @@ function OrdersPage({orders,stats,search,setSearch,showForm,setShowForm,onAdd,on
       {viewOrder && <DetailModal order={viewOrder} onClose={function(){setViewOrder(null);}} onDel={onDel} onUploadSlip={onUploadSlip} isAdmin={isAdmin}/>}
       <div style={S.tableWrap}><table style={S.table}>
         <thead><tr>{["เลขออเดอร์","วันที่","ลูกค้า","เบอร์","อำเภอ","พนักงาน","ราคา","COD","สลิป","หมายเหตุ"].map(function(h,i){return <th key={i} style={S.th}>{h}</th>;})}</tr></thead>
-        <tbody>{orders.length===0
+        <tbody>{pageOrders.length===0
           ? <tr><td colSpan={10} style={{textAlign:"center",padding:60,color:"#94a3b8"}}><div style={{fontSize:48,marginBottom:8}}>📭</div>{loading?"กำลังโหลด...":"ไม่พบออเดอร์"}</td></tr>
-          : orders.map(function(o){return(
+          : pageOrders.map(function(o){return(
             <tr key={o.OrderID} style={{cursor:"pointer",transition:"background .15s"}} onClick={function(){setViewOrder(o);}} onMouseEnter={function(e){e.currentTarget.style.background="#f8fafc";}} onMouseLeave={function(e){e.currentTarget.style.background="";}}>
               <td style={S.td}><span style={S.oid}>{o.OrderID}</span></td>
               <td style={S.td}><div style={{fontSize:13,fontWeight:600}}>{String(o.Timestamp||"").split(" ")[0]}</div><div style={{fontSize:11,color:"#94a3b8"}}>{String(o.Timestamp||"").split(" ")[1]}</div></td>
@@ -375,7 +385,22 @@ function OrdersPage({orders,stats,search,setSearch,showForm,setShowForm,onAdd,on
         }</tbody>
       </table></div>
 
-      {/* ดูสลิปเต็มจอ — กดจากตาราง */}
+      {/* Pagination */}
+      {totalPages > 1 && <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:6,marginTop:20,flexWrap:"wrap"}}>
+        <button onClick={function(){setPg(1);}} disabled={pg===1} style={{...S.sm,background:pg===1?"#f1f5f9":"#fff",color:pg===1?"#cbd5e1":"#475569",border:"1px solid #e2e8f0"}}>«</button>
+        <button onClick={function(){setPg(Math.max(1,pg-1));}} disabled={pg===1} style={{...S.sm,background:pg===1?"#f1f5f9":"#fff",color:pg===1?"#cbd5e1":"#475569",border:"1px solid #e2e8f0"}}>‹</button>
+        {Array.from({length:Math.min(5,totalPages)},function(_,i){
+          var start = Math.max(1, Math.min(pg-2, totalPages-4));
+          var p = start + i;
+          if(p>totalPages) return null;
+          return <button key={p} onClick={function(){setPg(p);}} style={{...S.sm,minWidth:36,background:pg===p?"#d97706":"#fff",color:pg===p?"#fff":"#475569",border:pg===p?"none":"1px solid #e2e8f0",fontWeight:pg===p?700:500}}>{p}</button>;
+        })}
+        <button onClick={function(){setPg(Math.min(totalPages,pg+1));}} disabled={pg===totalPages} style={{...S.sm,background:pg===totalPages?"#f1f5f9":"#fff",color:pg===totalPages?"#cbd5e1":"#475569",border:"1px solid #e2e8f0"}}>›</button>
+        <button onClick={function(){setPg(totalPages);}} disabled={pg===totalPages} style={{...S.sm,background:pg===totalPages?"#f1f5f9":"#fff",color:pg===totalPages?"#cbd5e1":"#475569",border:"1px solid #e2e8f0"}}>»</button>
+        <span style={{fontSize:12,color:"#94a3b8",marginLeft:8}}>หน้า {pg}/{totalPages} ({startIdx+1}-{Math.min(startIdx+perPage,orders.length)} จาก {orders.length})</span>
+      </div>}
+
+      {/* ดูสลิปเต็มจอ */}
       {slipFull && <div style={{position:"fixed",inset:0,zIndex:2000,background:"rgba(0,0,0,.9)",display:"flex",alignItems:"center",justifyContent:"center",padding:20,cursor:"pointer"}} onClick={function(){setSlipFull(null);}}>
         <div style={{position:"relative",maxWidth:"95%",maxHeight:"95%"}}>
           <img src={slipFull} alt="slip" style={{maxWidth:"100%",maxHeight:"90vh",borderRadius:16,objectFit:"contain",boxShadow:"0 0 60px rgba(217,119,6,.3)"}}/>
