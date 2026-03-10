@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>ProShip Orders</title>
+<title>SYSTEM TELESALE THE MT</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>"/>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
@@ -32,7 +32,7 @@ var useEffect = React.useEffect;
 var useRef = React.useRef;
 
 /* ===== API ===== */
-var DEFAULT_API = "https://script.google.com/macros/s/AKfycbzuRBkio4uGrAXEEvMrTE0Kz6LXYx9twRj7Sr-fHCnBjgolhgcyG7zXfDO1Pt9Vhbr4eQ/exec";
+var DEFAULT_API = "https://script.google.com/macros/s/AKfycbzgZTHqqJLTC0P6wEMK5KI4bbNAmjxG_ikQ0fTnyF3vd5upeyeGPSqiMsY3qTZTwrgbMg/exec";
 // ล้าง URL เก่าที่ cache ไว้ ให้ใช้ DEFAULT_API เสมอ
 try { var _old = localStorage.getItem("ps_api"); if(_old && _old !== DEFAULT_API) localStorage.removeItem("ps_api"); } catch(e){}
 function getApiUrl(){ return localStorage.getItem("ps_api") || DEFAULT_API; }
@@ -181,6 +181,7 @@ function App() {
   }
   async function delAcc(u){try{await api("deleteAccount",{username:u});notify("ลบแล้ว","warning");await loadAccounts();}catch(e){notify("ผิดพลาด","warning");}}
   async function resetPw(u,pw){try{await api("resetPassword",null,{username:u,password:pw});notify("รีเซ็ตรหัสผ่านแล้ว");await loadAccounts();}catch(e){notify("ผิดพลาด","warning");}}
+  async function editAcc(oldUsername,data){try{var r=await api("editAccount",null,{oldUsername:oldUsername,username:data.username,displayName:data.displayName,role:data.role});if(r.success){notify("แก้ไขบัญชีสำเร็จ");await loadAccounts();return true;}else{notify(r.error||"ผิดพลาด","warning");return false;}}catch(e){notify(e.message,"warning");return false;}}
   async function addProduct(d){try{var r=await api("addProduct",null,d);if(r.success){notify("เพิ่มสินค้า "+d.name);await loadProducts();return true;}else{notify(r.error||"ผิดพลาด","warning");return false;}}catch(e){notify(e.message,"warning");return false;}}
   async function delProduct(name){try{await api("deleteProduct",{name:name});notify("ลบสินค้าแล้ว","warning");await loadProducts();}catch(e){notify("ผิดพลาด","warning");}}
 
@@ -190,7 +191,7 @@ function App() {
       {loading && <div style={{position:"fixed",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,#6366f1,#8b5cf6)",zIndex:9999}}/>}
 
       <aside style={S.sidebar}>
-        <div style={S.sidebarHead}><span style={{fontSize:30}}>📦</span><div><div style={{fontSize:20,fontWeight:800,color:"#c7d2fe"}}>ProShip</div><div style={{fontSize:10,color:"#818cf8",letterSpacing:1}}>ORDER MANAGEMENT</div></div></div>
+        <div style={S.sidebarHead}><span style={{fontSize:30}}>📦</span><div><div style={{fontSize:20,fontWeight:800,color:"#c7d2fe"}}>THE MT</div><div style={{fontSize:10,color:"#818cf8",letterSpacing:1}}>SYSTEM TELESALE</div></div></div>
         <div style={S.userCard}><div style={S.avatar}>{(user.displayName||"?")[0]}</div><div><div style={{fontWeight:700,fontSize:14}}>{user.displayName}</div><div style={{fontSize:11,color:"#a5b4fc"}}>@{user.username}</div><span style={{padding:"2px 8px",borderRadius:6,fontSize:10,fontWeight:700,background:isAdmin?"rgba(250,204,21,.2)":"rgba(129,140,248,.2)",color:isAdmin?"#fbbf24":"#a5b4fc"}}>{isAdmin?"แอดมิน":"พนักงาน"}</span></div></div>
         <nav style={S.nav}>
           {[{id:"orders",icon:"📋",label:"ออเดอร์"},{id:"report",icon:"📊",label:"รายงาน"}].concat(isAdmin?[{id:"team",icon:"👥",label:"จัดการบัญชี"}]:[]).map(function(item){return(
@@ -204,7 +205,7 @@ function App() {
       <main style={S.main}>
         {page==="orders" && <OrdersPage orders={filtered} stats={stats} search={search} setSearch={setSearch} showForm={showForm} setShowForm={setShowForm} onAdd={addOrder} onDel={delOrder} user={user} viewOrder={viewOrder} setViewOrder={setViewOrder} isAdmin={isAdmin} loading={loading} products={products}/>}
         {page==="report" && <ReportPage user={user} reportType={reportType} setReportType={setReportType}/>}
-        {page==="team" && isAdmin && <TeamPage accounts={accounts} onAdd={addAcc} onToggle={toggleAcc} onToggleUpsell={toggleUpsell} onSaveUpsellBatch={saveUpsellBatch} onDel={delAcc} onResetPw={resetPw} products={products} onAddProduct={addProduct} onDelProduct={delProduct}/>}
+        {page==="team" && isAdmin && <TeamPage accounts={accounts} onAdd={addAcc} onToggle={toggleAcc} onToggleUpsell={toggleUpsell} onSaveUpsellBatch={saveUpsellBatch} onDel={delAcc} onResetPw={resetPw} onEditAcc={editAcc} products={products} onAddProduct={addProduct} onDelProduct={delProduct}/>}
       </main>
     </div>
   );
@@ -223,7 +224,7 @@ function SetupScreen({onSave}) {
   }
   return (
     <div style={S.loginBg}><div style={{...S.loginCard,maxWidth:520}}>
-      <div style={{textAlign:"center",marginBottom:32}}><div style={{fontSize:56,marginBottom:8}}>📦</div><h1 style={{fontSize:26,fontWeight:800,color:"#1e1b4b",margin:"0 0 6px"}}>ProShip Orders</h1><p style={{fontSize:14,color:"#64748b"}}>เชื่อมต่อ Google Sheets</p></div>
+      <div style={{textAlign:"center",marginBottom:32}}><div style={{fontSize:56,marginBottom:8}}>📦</div><h1 style={{fontSize:26,fontWeight:800,color:"#1e1b4b",margin:"0 0 6px"}}>SYSTEM TELESALE THE MT</h1><p style={{fontSize:14,color:"#64748b"}}>เชื่อมต่อ Google Sheets</p></div>
       <div style={{background:"#f8fafc",borderRadius:14,padding:20,marginBottom:20,border:"1px solid #e2e8f0"}}>
         <h3 style={{fontSize:15,fontWeight:700,marginBottom:12}}>📖 วิธีติดตั้ง</h3>
         {["สร้าง Google Sheet ใหม่","Extensions > Apps Script → วางโค้ด","Run → initSheet → อนุญาตสิทธิ์","Deploy > Web app > Anyone","คัดลอก URL มาวางด้านล่าง"].map(function(s,i){return(
@@ -256,7 +257,7 @@ function LoginScreen({accounts,onLogin,onReload,onSetup}) {
   }
   return (
     <div style={S.loginBg}><div ref={ref} style={S.loginCard}>
-      <div style={{textAlign:"center",marginBottom:36}}><div style={{fontSize:56,marginBottom:8}}>📦</div><h1 style={{fontSize:28,fontWeight:800,color:"#1e1b4b",margin:"0 0 6px"}}>ProShip Orders</h1><p style={{fontSize:14,color:"#64748b"}}>Google Sheets CRM</p><div style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:8,padding:"4px 12px",borderRadius:8,background:"#d1fae5",color:"#059669",fontSize:12,fontWeight:600}}>🟢 เชื่อมต่อแล้ว</div></div>
+      <div style={{textAlign:"center",marginBottom:36}}><div style={{fontSize:56,marginBottom:8}}>📦</div><h1 style={{fontSize:28,fontWeight:800,color:"#1e1b4b",margin:"0 0 6px"}}>SYSTEM TELESALE THE MT</h1><p style={{fontSize:14,color:"#64748b"}}>Google Sheets CRM</p><div style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:8,padding:"4px 12px",borderRadius:8,background:"#d1fae5",color:"#059669",fontSize:12,fontWeight:600}}>🟢 เชื่อมต่อแล้ว</div></div>
       <div style={{marginBottom:20}}><label style={S.fLabel}>👤 Username</label><input value={username} onChange={function(e){setUsername(e.target.value);setError("");}} onKeyDown={function(e){if(e.key==="Enter"){var el=document.getElementById("pw");if(el)el.focus();}}} placeholder="ชื่อผู้ใช้" autoFocus style={{...S.pInput,padding:"12px 16px",fontSize:15}}/></div>
       <div style={{marginBottom:24}}><label style={S.fLabel}>🔒 Password</label><div style={{position:"relative"}}><input id="pw" type={showPw?"text":"password"} value={password} onChange={function(e){setPassword(e.target.value);setError("");}} onKeyDown={function(e){if(e.key==="Enter")go();}} placeholder="รหัสผ่าน" style={{...S.pInput,padding:"12px 48px 12px 16px",fontSize:15}}/><button onClick={function(){setShowPw(!showPw);}} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",border:"none",background:"none",cursor:"pointer",fontSize:18,color:"#94a3b8"}}>{showPw?"🙈":"👁"}</button></div></div>
       {error && <div style={{background:"#fef2f2",color:"#dc2626",padding:"10px 14px",borderRadius:10,fontSize:13,fontWeight:600,marginBottom:16,border:"1px solid #fecaca"}}>❌ {error}</div>}
@@ -539,7 +540,7 @@ function DetailModal({order,onClose,onDel,isAdmin}) {
 }
 
 /* ===== TEAM ===== */
-function TeamPage({accounts,onAdd,onToggle,onToggleUpsell,onSaveUpsellBatch,onDel,onResetPw,products,onAddProduct,onDelProduct}) {
+function TeamPage({accounts,onAdd,onToggle,onToggleUpsell,onSaveUpsellBatch,onDel,onResetPw,onEditAcc,products,onAddProduct,onDelProduct}) {
   var [show,setShow] = useState(false);
   var [nf,setNf] = useState({username:"",displayName:"",password:"",role:"user",canUpsell:false});
   var [resetId,setResetId] = useState(null);
@@ -551,6 +552,9 @@ function TeamPage({accounts,onAdd,onToggle,onToggleUpsell,onSaveUpsellBatch,onDe
   var [pBrand,setPBrand] = useState("");
   var [pName,setPName] = useState("");
   var [pPrice,setPPrice] = useState("");
+  // Edit account
+  var [editAcc,setEditAcc] = useState(null); // {oldUsername, username, displayName, role}
+  var [editSaving,setEditSaving] = useState(false);
 
   async function handleAdd(){if(!nf.username||!nf.displayName||!nf.password){alert("กรอกให้ครบ");return;}if(nf.password.length<4){alert("Password อย่างน้อย 4 ตัว");return;}var ok=await onAdd({...nf,active:true});if(ok){setNf({username:"",displayName:"",password:"",role:"user",canUpsell:false});setShow(false);}}
 
@@ -591,6 +595,26 @@ function TeamPage({accounts,onAdd,onToggle,onToggleUpsell,onSaveUpsellBatch,onDe
 
       {/* Reset PW Modal */}
       {resetId && <div style={S.modalOverlay} onClick={function(){setResetId(null);}}><div style={{background:"#fff",borderRadius:16,padding:28,width:"100%",maxWidth:400}} onClick={function(e){e.stopPropagation();}}><h3 style={{margin:"0 0 16px",fontSize:16,fontWeight:700}}>🔑 รีเซ็ต PW — @{resetId}</h3><input type="password" value={newPw} onChange={function(e){setNewPw(e.target.value);}} placeholder="Password ใหม่" style={{...S.pInput,marginBottom:16}}/><div style={{display:"flex",gap:10,justifyContent:"flex-end"}}><button style={S.cancelBtn} onClick={function(){setResetId(null);}}>ยกเลิก</button><button style={S.submitBtn} onClick={function(){if(newPw.length<4){alert("อย่างน้อย 4 ตัว");return;}onResetPw(resetId,newPw);setResetId(null);setNewPw("");}}>บันทึก</button></div></div></div>}
+
+      {/* Edit Account Modal */}
+      {editAcc && <div style={S.modalOverlay} onClick={function(){setEditAcc(null);}}><div style={{background:"#fff",borderRadius:16,padding:28,width:"100%",maxWidth:440}} onClick={function(e){e.stopPropagation();}}>
+        <h3 style={{margin:"0 0 20px",fontSize:16,fontWeight:700}}>✏️ แก้ไขบัญชี — @{editAcc.oldUsername}</h3>
+        <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:20}}>
+          <div><label style={S.fLabel}>🆔 Username</label><input value={editAcc.username} onChange={function(e){setEditAcc({...editAcc,username:e.target.value});}} style={S.pInput}/></div>
+          <div><label style={S.fLabel}>👤 ชื่อที่แสดง</label><input value={editAcc.displayName} onChange={function(e){setEditAcc({...editAcc,displayName:e.target.value});}} style={S.pInput}/></div>
+          <div><label style={S.fLabel}>🏷 บทบาท</label><select value={editAcc.role} onChange={function(e){setEditAcc({...editAcc,role:e.target.value});}} style={S.pInput}><option value="user">พนักงาน</option><option value="admin">แอดมิน</option></select></div>
+        </div>
+        <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+          <button style={S.cancelBtn} onClick={function(){setEditAcc(null);}}>ยกเลิก</button>
+          <button style={S.submitBtn} disabled={editSaving} onClick={async function(){
+            if(!editAcc.username||!editAcc.displayName){alert("กรอกให้ครบ");return;}
+            setEditSaving(true);
+            var ok = await onEditAcc(editAcc.oldUsername,{username:editAcc.username,displayName:editAcc.displayName,role:editAcc.role});
+            setEditSaving(false);
+            if(ok) setEditAcc(null);
+          }}>{editSaving?"⏳ บันทึก...":"✅ บันทึก"}</button>
+        </div>
+      </div></div>}
 
       {/* 🔥 UPSELL SETTINGS — เลือกหลายคนพร้อมกัน กดบันทึกทีเดียว */}
       <div style={{background:"#fff",borderRadius:16,padding:24,marginBottom:24,border:"2px solid #fed7aa",boxShadow:"0 2px 12px rgba(234,88,12,.08)"}}>
@@ -678,13 +702,13 @@ function TeamPage({accounts,onAdd,onToggle,onToggleUpsell,onSaveUpsellBatch,onDe
 
       {/* Account Cards */}
       <h3 style={{fontSize:15,fontWeight:700,color:"#475569",marginBottom:12}}>👑 แอดมิน ({admins.length})</h3>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12,marginBottom:24}}>{admins.map(function(a){return <AccCard key={a.username} a={a} onReset={setResetId} prot/>;})}</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12,marginBottom:24}}>{admins.map(function(a){return <AccCard key={a.username} a={a} onReset={setResetId} onEdit={setEditAcc} prot/>;})}</div>
       <h3 style={{fontSize:15,fontWeight:700,color:"#475569",marginBottom:12}}>📞 พนักงาน ({users.length})</h3>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>{users.map(function(a){return <AccCard key={a.username} a={a} onToggle={onToggle} onDel={onDel} onReset={setResetId}/>;})}</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>{users.map(function(a){return <AccCard key={a.username} a={a} onToggle={onToggle} onDel={onDel} onReset={setResetId} onEdit={setEditAcc}/>;})}</div>
     </div>
   );
 }
-function AccCard({a,onToggle,onDel,onReset,prot}){return(
+function AccCard({a,onToggle,onDel,onReset,onEdit,prot}){return(
   <div style={{background:"#fff",borderRadius:14,padding:18,border:"2px solid "+(a.active?"#e0e7ff":"#fee2e2"),opacity:a.active?1:.6}}>
     <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
       <div style={{width:44,height:44,borderRadius:"50%",background:"#eef2ff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:800,color:"#6366f1"}}>{(a.displayName||"?")[0]}</div>
@@ -698,9 +722,10 @@ function AccCard({a,onToggle,onDel,onReset,prot}){return(
       </div>
     </div>
     <div style={{display:"flex",gap:6}}>
+      <button onClick={function(){onEdit({oldUsername:a.username,username:a.username,displayName:a.displayName||"",role:a.role});}} style={{...S.sm,flex:1,background:"#fefce8",color:"#a16207"}}>✏️ แก้ไข</button>
       <button onClick={function(){onReset(a.username);}} style={{...S.sm,flex:1,background:"#eef2ff",color:"#6366f1"}}>🔑 PW</button>
       {!prot && <React.Fragment>
-        <button onClick={function(){onToggle(a.username);}} style={{...S.sm,flex:1,background:a.active?"#fef3c7":"#d1fae5",color:a.active?"#d97706":"#059669"}}>{a.active?"⏸ ระงับ":"▶️ เปิด"}</button>
+        <button onClick={function(){onToggle(a.username);}} style={{...S.sm,flex:1,background:a.active?"#fef3c7":"#d1fae5",color:a.active?"#d97706":"#059669"}}>{a.active?"⏸":"▶️"}</button>
         <button onClick={function(){if(confirm("ลบ?"))onDel(a.username);}} style={{...S.sm,background:"#fee2e2",color:"#ef4444"}}>🗑</button>
       </React.Fragment>}
     </div>
