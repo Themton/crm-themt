@@ -32,7 +32,7 @@ var useEffect = React.useEffect;
 var useRef = React.useRef;
 
 /* ===== API ===== */
-var DEFAULT_API = "https://script.google.com/macros/s/AKfycbzgZTHqqJLTC0P6wEMK5KI4bbNAmjxG_ikQ0fTnyF3vd5upeyeGPSqiMsY3qTZTwrgbMg/exec";
+var DEFAULT_API = "https://script.google.com/macros/s/AKfycbww76thYV5YYMQdDGfXpuVkCddoIBqBDNca8FY_9QyyObcB0-KDZfs9drjO10InyCmcJA/exec";
 // ล้าง URL เก่าที่ cache ไว้ ให้ใช้ DEFAULT_API เสมอ
 try { var _old = localStorage.getItem("ps_api"); if(_old && _old !== DEFAULT_API) localStorage.removeItem("ps_api"); } catch(e){}
 function getApiUrl(){ return localStorage.getItem("ps_api") || DEFAULT_API; }
@@ -252,7 +252,7 @@ function LoginScreen({accounts,onLogin,onReload,onSetup}) {
     var acc=accounts.find(function(a){return a.username===username;});
     if(!acc){setError("ไม่พบ Username");shake();return;}
     if(!acc.active){setError("บัญชีถูกระงับ");shake();return;}
-    if(acc.password!==password){setError("Password ไม่ถูกต้อง");shake();return;}
+    if(String(acc.password)!==String(password)){setError("Password ไม่ถูกต้อง");shake();return;}
     onLogin(acc);
   }
   return (
