@@ -9,6 +9,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script src="thai-addr.js"></script>
+<script src="thai_addr.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Noto Sans Thai',sans-serif;background:#f0f2f7}
@@ -299,6 +301,64 @@ function OrdersPage({orders,stats,search,setSearch,showForm,setShowForm,onAdd,on
   );
 }
 
+/* ===== ADDRESS AUTO-COMPLETE ===== */
+function searchAddr(query, field) {
+  if (!query || query.length < 2 || typeof TH === "undefined") return [];
+  var q = query.trim().replace(/^(เขต|อำเภอ|ตำบล|แขวง|อ\.|ต\.)\s*/,"");
+  if (q.length < 2) return [];
+  var fieldIdx = {s:0, d:1, p:2, z:3}[field] || 0;
+  var results = [];
+  for (var i = 0; i < TH.length && results.length < 20; i++) {
+    if (TH[i][fieldIdx].indexOf(q) >= 0) results.push(TH[i]);
+  }
+  return results;
+}
+
+function AddrAC({label, value, field, onSelect, onChange}) {
+  var [open, setOpen] = useState(false);
+  var [results, setResults] = useState([]);
+  var wrapRef = useRef(null);
+
+  function handleChange(v) {
+    onChange(v);
+    var r = searchAddr(v, field);
+    setResults(r);
+    setOpen(r.length > 0);
+  }
+
+  function handleSelect(item) {
+    onSelect(item);
+    setOpen(false);
+    setResults([]);
+  }
+
+  // ปิด dropdown เมื่อกดข้างนอก
+  useEffect(function(){
+    function handleClick(e){ if(wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown", handleClick);
+    return function(){ document.removeEventListener("mousedown", handleClick); };
+  },[]);
+
+  return (
+    <div ref={wrapRef} style={{position:"relative"}}>
+      <label style={S.fLabel}>{label}</label>
+      <input value={value||""} onChange={function(e){handleChange(e.target.value);}} onFocus={function(){if(results.length>0)setOpen(true);}}
+        style={{...S.pInput,borderColor:value?"#a5b4fc":"#e2e8f0",background:value?"#eef2ff":"#fff"}}/>
+      {open && results.length > 0 && <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:100,background:"#fff",border:"1.5px solid #c7d2fe",borderRadius:10,maxHeight:200,overflowY:"auto",boxShadow:"0 8px 24px rgba(99,102,241,.15)",marginTop:4}}>
+        {results.map(function(item, idx){
+          return <div key={idx} onClick={function(){handleSelect(item);}}
+            style={{padding:"10px 14px",cursor:"pointer",borderBottom:"1px solid #f1f5f9",fontSize:13,transition:"background .1s"}}
+            onMouseEnter={function(e){e.currentTarget.style.background="#eef2ff";}}
+            onMouseLeave={function(e){e.currentTarget.style.background="";}}>
+            <div style={{fontWeight:600,color:"#1e293b"}}>{item[0]} <span style={{color:"#94a3b8",fontWeight:400}}>→</span> {item[1]}</div>
+            <div style={{fontSize:11,color:"#94a3b8"}}>{item[2]} {item[3]}</div>
+          </div>;
+        })}
+      </div>}
+    </div>
+  );
+}
+
 /* ===== Group products by [category] prefix ===== */
 function groupProducts(products) {
   var groups = {};
@@ -362,7 +422,11 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
         <div style={{textAlign:"center",borderBottom:"2px solid #e0e7ff",lineHeight:"0.1em",marginBottom:20}}><span style={{background:"#fff",padding:"0 16px",fontSize:13,fontWeight:700,color:"#6366f1"}}>📋 ตรวจสอบ & แก้ไข</span></div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}><PF i="📱" l="เบอร์ *" v={f.MobileNo} c={function(v){set("MobileNo",v);}}/><PF i="👤" l="ชื่อ *" v={f.Name} c={function(v){set("Name",v);}}/></div>
         <div style={{marginBottom:10}}><PF i="🏠" l="ที่อยู่" v={f.Address} c={function(v){set("Address",v);}}/></div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}><PF i="📍" l="ตำบล" v={f.SubDistrict} c={function(v){set("SubDistrict",v);}}/><PF i="📍" l="อำเภอ" v={f.District} c={function(v){set("District",v);}}/><PF i="📮" l="ปณ." v={f.ZIP} c={function(v){set("ZIP",v);}}/></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}>
+          <AddrAC label="📍 ตำบล/แขวง" value={f.SubDistrict} field="s" onSelect={function(item){set("SubDistrict",item[0]);set("District",item[1]);set("ZIP",item[3]);}} onChange={function(v){set("SubDistrict",v);}}/>
+          <AddrAC label="📍 อำเภอ/เขต" value={f.District} field="d" onSelect={function(item){set("SubDistrict",item[0]);set("District",item[1]);set("ZIP",item[3]);}} onChange={function(v){set("District",v);}}/>
+          <AddrAC label="📮 รหัส ปณ." value={f.ZIP} field="z" onSelect={function(item){set("SubDistrict",item[0]);set("District",item[1]);set("ZIP",item[3]);}} onChange={function(v){set("ZIP",v);}}/>
+        </div>
         <div style={{marginBottom:10}}><PF i="📱" l="FB/Line ลูกค้า" v={f.CustomerFBLine} c={function(v){set("CustomerFBLine",v);}}/></div>
 
         {/* 🛒 เลือกสินค้า — Dropdown แบ่งกลุ่ม */}
