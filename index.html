@@ -359,16 +359,53 @@ function AddrAC({label, value, field, onSelect, onChange}) {
   );
 }
 
-/* ===== Group products by [category] prefix ===== */
-function groupProducts(products) {
+/* ===== Product helpers ===== */
+// ดึงแบรนด์หลัก เช่น "KISO", "RONG", "โปรแยก"
+function getBrands(products) {
+  var brands = [];
+  products.forEach(function(p) {
+    var match = p.name.match(/^\[([^\]]+)\]/);
+    var cat = match ? match[1] : "อื่นๆ";
+    var main = cat.split(/\s/)[0];
+    if (brands.indexOf(main) < 0) brands.push(main);
+  });
+  return brands;
+}
+
+// ดึงกลุ่มย่อยทั้งหมด เช่น "KISO 50g", "KISO 10g ครีม", "RONG 10g"
+function getCategories(products) {
+  var cats = [];
+  products.forEach(function(p) {
+    var match = p.name.match(/^\[([^\]]+)\]/);
+    var cat = match ? match[1] : "อื่นๆ";
+    if (cats.indexOf(cat) < 0) cats.push(cat);
+  });
+  return cats;
+}
+
+// ดึงสินค้าตามแบรนด์
+function getProductsByBrand(products, brand) {
+  if (!brand) return [];
+  return products.filter(function(p) {
+    var match = p.name.match(/^\[([^\]]+)\]/);
+    var cat = match ? match[1] : "อื่นๆ";
+    return cat.indexOf(brand) === 0;
+  }).map(function(p) {
+    var match = p.name.match(/^\[([^\]]+)\]\s*(.*)/);
+    return {name:p.name, shortName:match?match[2]:p.name, price:p.price, category:match?match[1]:""};
+  });
+}
+
+// แบ่งกลุ่มย่อยภายในแบรนด์ เช่น KISO → [KISO 50g, KISO 10g ครีม, KISO 10g เซ็ต]
+function getSubgroups(products, brand) {
+  if (!brand) return [];
+  var items = getProductsByBrand(products, brand);
   var groups = {};
   var order = [];
-  products.forEach(function(p) {
-    var match = p.name.match(/^\[([^\]]+)\]\s*(.*)/);
-    var label = match ? match[1] : "อื่นๆ";
-    var shortName = match ? match[2] : p.name;
-    if (!groups[label]) { groups[label] = []; order.push(label); }
-    groups[label].push({name:p.name, shortName:shortName, price:p.price});
+  items.forEach(function(p) {
+    var cat = p.category || brand;
+    if (!groups[cat]) { groups[cat] = []; order.push(cat); }
+    groups[cat].push(p);
   });
   return order.map(function(label){return {label:label, items:groups[label]};});
 }
@@ -380,6 +417,7 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
   var [parsed,setParsed] = useState(false);
   var [upsell,setUpsell] = useState(false);
   var [selectedProduct,setSelectedProduct] = useState("");
+  var [selectedBrand,setSelectedBrand] = useState("");
 
   function handleText(t) {
     setRaw(t);
@@ -404,7 +442,7 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
   }
 
   function submit(){if(!f.MobileNo||!f.Name){alert("กรุณากรอกเบอร์มือถือและชื่อลูกค้า");return;}onSubmit({...f, upsell:upsell});}
-  function clear(){setRaw("");setF({MobileNo:"",Name:"",Address:"",SubDistrict:"",District:"",ZIP:"",CustomerFBLine:"",SalePrice:"",COD:"",Remark:""});setParsed(false);setUpsell(false);setSelectedProduct("");}
+  function clear(){setRaw("");setF({MobileNo:"",Name:"",Address:"",SubDistrict:"",District:"",ZIP:"",CustomerFBLine:"",SalePrice:"",COD:"",Remark:""});setParsed(false);setUpsell(false);setSelectedProduct("");setSelectedBrand("");}
 
   return (
     <div style={{...S.formCard,animation:"slideDown .3s"}}>
@@ -429,19 +467,31 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
         </div>
         <div style={{marginBottom:10}}><PF i="📱" l="FB/Line ลูกค้า" v={f.CustomerFBLine} c={function(v){set("CustomerFBLine",v);}}/></div>
 
-        {/* 🛒 เลือกสินค้า — Dropdown แบ่งกลุ่ม */}
+        {/* 🛒 เลือกสินค้า — 2 ขั้น: แบรนด์ → โปร */}
         <div style={{marginBottom:12}}>
           <label style={S.fLabel}>🛒 เลือกสินค้า</label>
-          <select value={selectedProduct} onChange={function(e){selectProduct(e.target.value);}}
-            style={{...S.pInput,padding:"12px 16px",fontSize:14,fontWeight:600,color:selectedProduct?"#065f46":"#94a3b8",background:selectedProduct?"#ecfdf5":"#fff",borderColor:selectedProduct?"#059669":"#e2e8f0",cursor:"pointer"}}>
-            <option value="">-- เลือกสินค้า --</option>
-            {groupProducts(products||[]).map(function(g){
-              return <optgroup key={g.label} label={g.label}>
-                {g.items.map(function(p){return <option key={p.name} value={p.name}>{p.shortName} — ฿{p.price.toLocaleString()}</option>;})}
-              </optgroup>;
-            })}
-          </select>
-          {selectedProduct && <div style={{marginTop:8,padding:"8px 12px",borderRadius:8,background:"#ecfdf5",border:"1px solid #a7f3d0",fontSize:13,color:"#065f46",fontWeight:600}}>✅ {selectedProduct} — ฿{(function(){var p=(products||[]).find(function(x){return x.name===selectedProduct;});return p?p.price.toLocaleString():"0";})()}</div>}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 2fr",gap:10}}>
+            {/* ดรอปดาวน์ 1: เลือกแบรนด์ */}
+            <select value={selectedBrand} onChange={function(e){setSelectedBrand(e.target.value);setSelectedProduct("");}}
+              style={{...S.pInput,padding:"12px 14px",fontSize:14,fontWeight:700,color:selectedBrand?"#6366f1":"#94a3b8",background:selectedBrand?"#eef2ff":"#fff",borderColor:selectedBrand?"#6366f1":"#e2e8f0",cursor:"pointer"}}>
+              <option value="">-- เลือกแบรนด์ --</option>
+              {getBrands(products||[]).map(function(b){return <option key={b} value={b}>{b}</option>;})}
+            </select>
+            {/* ดรอปดาวน์ 2: เลือกโปร — แบ่งกลุ่มย่อย */}
+            <select value={selectedProduct} onChange={function(e){selectProduct(e.target.value);}} disabled={!selectedBrand}
+              style={{...S.pInput,padding:"12px 14px",fontSize:14,fontWeight:600,color:selectedProduct?"#065f46":"#94a3b8",background:selectedProduct?"#ecfdf5":!selectedBrand?"#f8fafc":"#fff",borderColor:selectedProduct?"#059669":"#e2e8f0",cursor:selectedBrand?"pointer":"not-allowed"}}>
+              <option value="">{selectedBrand?"-- เลือกโปร "+selectedBrand+" --":"-- เลือกแบรนด์ก่อน --"}</option>
+              {getSubgroups(products||[],selectedBrand).map(function(sg){
+                return <optgroup key={sg.label} label={"— "+sg.label+" —"}>
+                  {sg.items.map(function(p){return <option key={p.name} value={p.name}>{p.shortName} — ฿{p.price.toLocaleString()}</option>;})}
+                </optgroup>;
+              })}
+            </select>
+          </div>
+          {selectedProduct && <div style={{marginTop:8,padding:"10px 14px",borderRadius:10,background:"#ecfdf5",border:"1.5px solid #a7f3d0",fontSize:14,color:"#065f46",fontWeight:600,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span>✅ {selectedProduct.replace(/^\[[^\]]+\]\s*/,"")}</span>
+            <span style={{fontSize:16,fontWeight:800}}>฿{(function(){var p=(products||[]).find(function(x){return x.name===selectedProduct;});return p?p.price.toLocaleString():"0";})()}</span>
+          </div>}
         </div>
 
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}><PF i="💰" l="ราคาขาย" v={f.SalePrice} c={function(v){set("SalePrice",v);}}/><PF i="💵" l="ยอด COD" v={f.COD} c={function(v){set("COD",v);}}/></div>
@@ -498,6 +548,7 @@ function TeamPage({accounts,onAdd,onToggle,onToggleUpsell,onSaveUpsellBatch,onDe
   var [saving,setSaving] = useState(false);
   // Product form
   var [showProd,setShowProd] = useState(false);
+  var [pBrand,setPBrand] = useState("");
   var [pName,setPName] = useState("");
   var [pPrice,setPPrice] = useState("");
 
@@ -578,24 +629,51 @@ function TeamPage({accounts,onAdd,onToggle,onToggleUpsell,onSaveUpsellBatch,onDe
       {/* 🛒 PRODUCT MANAGEMENT */}
       <div style={{background:"#fff",borderRadius:16,padding:24,marginBottom:24,border:"2px solid #a7f3d0",boxShadow:"0 2px 12px rgba(5,150,105,.06)"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-          <div><h3 style={{margin:0,fontSize:16,fontWeight:700,color:"#065f46"}}>🛒 จัดการสินค้า</h3><p style={{margin:"4px 0 0",fontSize:13,color:"#94a3b8"}}>เพิ่ม/ลบสินค้า — แสดงเป็นปุ่มให้เลือกตอนสร้างออเดอร์</p></div>
+          <div><h3 style={{margin:0,fontSize:16,fontWeight:700,color:"#065f46"}}>🛒 จัดการสินค้า</h3><p style={{margin:"4px 0 0",fontSize:13,color:"#94a3b8"}}>เพิ่ม/ลบสินค้า — แยกตามแบรนด์</p></div>
           <button onClick={function(){setShowProd(!showProd);}} style={{...S.sm,background:"#ecfdf5",color:"#059669",border:"1.5px solid #a7f3d0",padding:"8px 18px",fontSize:13}}>{showProd?"✕ ปิด":"＋ เพิ่มสินค้า"}</button>
         </div>
-        {showProd && <div style={{display:"grid",gridTemplateColumns:"2fr 1fr auto",gap:10,marginBottom:16,alignItems:"end"}}>
-          <div><label style={S.fLabel}>ชื่อสินค้า</label><input value={pName} onChange={function(e){setPName(e.target.value);}} placeholder="เช่น Kiso (10g)" style={S.pInput}/></div>
-          <div><label style={S.fLabel}>ราคา (บาท)</label><input value={pPrice} onChange={function(e){setPPrice(e.target.value);}} placeholder="399" style={S.pInput}/></div>
-          <button onClick={async function(){if(!pName){alert("กรอกชื่อสินค้า");return;}var ok=await onAddProduct({name:pName,price:pPrice||0});if(ok){setPName("");setPPrice("");setShowProd(false);}}} style={{...S.submitBtn,padding:"10px 20px",fontSize:13,background:"linear-gradient(135deg,#059669,#047857)"}}>✅ เพิ่ม</button>
-        </div>}
-        <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-          {(products||[]).map(function(p){return(
-            <div key={p.name} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",borderRadius:10,background:"#ecfdf5",border:"1.5px solid #a7f3d0"}}>
-              <span style={{fontSize:13,fontWeight:600,color:"#065f46"}}>{p.name}</span>
-              <span style={{fontSize:12,fontWeight:700,color:"#059669"}}>฿{p.price.toLocaleString()}</span>
-              <button onClick={function(){if(confirm("ลบสินค้า "+p.name+" ?"))onDelProduct(p.name);}} style={{width:22,height:22,borderRadius:6,border:"none",background:"#fee2e2",color:"#ef4444",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+        {showProd && <div style={{background:"#f0fdf4",borderRadius:12,padding:16,marginBottom:16,border:"1px solid #bbf7d0"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 2fr 1fr auto",gap:10,alignItems:"end"}}>
+            <div><label style={S.fLabel}>กลุ่ม/แบรนด์</label>
+              <select value={pBrand} onChange={function(e){setPBrand(e.target.value);}} style={S.pInput}>
+                <option value="">-- เลือก --</option>
+                {getCategories(products||[]).map(function(c){return <option key={c} value={c}>{c}</option>;})}
+                <option value="__new">+ สร้างกลุ่มใหม่</option>
+              </select>
             </div>
-          );})}
-          {(products||[]).length===0 && <div style={{fontSize:13,color:"#94a3b8",padding:8}}>ยังไม่มีสินค้า</div>}
-        </div>
+            <div><label style={S.fLabel}>ชื่อโปร</label><input value={pName} onChange={function(e){setPName(e.target.value);}} placeholder="เช่น KISO 5(10g) สบู่1" style={S.pInput}/></div>
+            <div><label style={S.fLabel}>ราคา ปลายทาง</label><input value={pPrice} onChange={function(e){setPPrice(e.target.value);}} placeholder="399" style={S.pInput}/></div>
+            <button onClick={async function(){
+              if(!pName){alert("กรอกชื่อโปร");return;}
+              var brand = pBrand;
+              if(brand==="__new"){brand=prompt("ชื่อแบรนด์ใหม่:");if(!brand)return;}
+              if(!brand){alert("เลือกแบรนด์");return;}
+              var fullName = "[" + brand + "] " + pName;
+              var ok=await onAddProduct({name:fullName,price:pPrice||0});
+              if(ok){setPName("");setPPrice("");}
+            }} style={{...S.submitBtn,padding:"10px 20px",fontSize:13,background:"linear-gradient(135deg,#059669,#047857)"}}>✅ เพิ่ม</button>
+          </div>
+        </div>}
+        {/* แสดงสินค้าแยกตามแบรนด์ */}
+        {getBrands(products||[]).map(function(brand){
+          var items = getProductsByBrand(products||[],brand);
+          return <div key={brand} style={{marginBottom:16}}>
+            <div style={{fontSize:14,fontWeight:700,color:"#065f46",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
+              <span style={{padding:"2px 10px",borderRadius:6,background:"#065f46",color:"#fff",fontSize:12}}>{brand}</span>
+              <span style={{fontSize:12,color:"#94a3b8",fontWeight:400}}>{items.length} โปร</span>
+            </div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {items.map(function(p){return(
+                <div key={p.name} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 12px",borderRadius:8,background:"#ecfdf5",border:"1px solid #a7f3d0",fontSize:12}}>
+                  <span style={{fontWeight:600,color:"#065f46"}}>{p.shortName}</span>
+                  <span style={{fontWeight:700,color:"#059669"}}>฿{p.price.toLocaleString()}</span>
+                  <button onClick={function(){if(confirm("ลบ "+p.shortName+" ?"))onDelProduct(p.name);}} style={{width:18,height:18,borderRadius:4,border:"none",background:"#fee2e2",color:"#ef4444",fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>✕</button>
+                </div>
+              );})}
+            </div>
+          </div>;
+        })}
+        {(products||[]).length===0 && <div style={{fontSize:13,color:"#94a3b8",padding:8}}>ยังไม่มีสินค้า</div>}
       </div>
 
       {/* Account Cards */}
