@@ -18,6 +18,7 @@ body{font-family:'Noto Sans Thai',sans-serif;background:#faf8f3}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes popIn{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
 @keyframes shake{0%,100%{transform:translateX(0)}25%,75%{transform:translateX(-6px)}50%{transform:translateX(6px)}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 textarea:focus,input:focus,select:focus{border-color:#fbbf24!important;box-shadow:0 0 0 3px rgba(251,191,36,.15)!important}
 ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:#fde68a;border-radius:3px}
 .shake{animation:shake .4s}
@@ -153,7 +154,7 @@ function App() {
   var stats = {total:orders.length, totalSales:totalS, totalCOD:totalC};
 
   async function addOrder(data) {
-    setShowForm(false);
+    // ไม่ปิดฟอร์มทันที → ให้ overlay "กำลังบันทึก" แสดงก่อน
     var slipData = data.slipData || "";
     var payload = {SalesPerson:user.displayName, SalesChannel:"CRM",
       MobileNo:data.MobileNo, Name:data.Name, Address:data.Address, SubDistrict:data.SubDistrict,
@@ -163,20 +164,17 @@ function App() {
     try {
       var res = await api("addOrder",null,payload);
       var orderId = res.orderId;
+      // ปิดฟอร์มหลัง API ตอบ
+      setShowForm(false);
       notify("✅ " + orderId + (data.upsell ? " → 🔥 Upsell" : " → Orders"));
-      // เพิ่มเข้า local state ทันที
       if (!data.upsell) {
         var now = new Date();
         var ts = now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0")+" "+String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0")+":"+String(now.getSeconds()).padStart(2,"0");
         setOrders(function(prev){return [{OrderID:orderId,Timestamp:ts,MobileNo:data.MobileNo,Name:data.Name,Address:data.Address,SubDistrict:data.SubDistrict,District:data.District,ZIP:data.ZIP,CustomerFBLine:data.CustomerFBLine||"",SalesChannel:"CRM",SalesPerson:user.displayName,SalePrice:data.SalePrice,COD:data.COD,Remark:data.Remark,SlipURL:""}].concat(prev);});
       }
-      // อัพโหลดสลิปถ้ามี
-      if (slipData) {
-        uploadSlip(orderId, slipData);
-      } else {
-        loadOrders();
-      }
-    } catch(e) { notify(e.message,"warning"); }
+      if (slipData) { uploadSlip(orderId, slipData); }
+      else { loadOrders(); }
+    } catch(e) { setShowForm(false); notify(e.message,"warning"); }
   }
   async function delOrder(oid) {
     setViewOrder(null);
@@ -530,6 +528,8 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
     }
   }
 
+  var [saving,setSaving] = useState(false);
+
   function submit(){
     var missing = [];
     if(!f.MobileNo) missing.push("เบอร์มือถือ");
@@ -542,13 +542,14 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
     if(!isTransfer && !f.COD && f.COD!=="0") missing.push("ยอด COD");
     if(!f.Remark) missing.push("หมายเหตุ/สินค้า");
     if(missing.length>0){alert("กรุณากรอกให้ครบ:\n• "+missing.join("\n• "));return;}
+    setSaving(true);
     var finalCOD = isTransfer ? "0" : f.COD;
     onSubmit({...f, COD:finalCOD, upsell:upsell, slipData:slipPreview||""});
   }
   function clear(){setRaw("");setF({MobileNo:"",Name:"",Address:"",SubDistrict:"",District:"",ZIP:"",CustomerFBLine:"",SalePrice:"",COD:"",Remark:""});setParsed(false);setUpsell(false);setSelectedProduct("");setSelectedBrand("");setSlipPreview(null);setIsTransfer(false);}
 
   return (
-    <div style={{...S.formCard,animation:"slideDown .3s"}}>
+    <div style={{...S.formCard,animation:"slideDown .3s",position:"relative",overflow:"hidden"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
         <div>
           <h3 style={{margin:0,fontSize:18,fontWeight:800}}>🧠 Smart Paste <span style={{fontSize:11,fontWeight:600,color:"#fbbf24",background:"#fffbeb",padding:"2px 8px",borderRadius:6}}>วางแล้วแยกอัตโนมัติ</span></h3>
@@ -661,11 +662,18 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
         </div>}
 
         <div style={{display:"flex",gap:12,justifyContent:"flex-end"}}>
-          <button style={S.cancelBtn} onClick={onCancel}>ยกเลิก</button>
-          <button style={{...S.submitBtn,...(upsell?{background:"linear-gradient(135deg,#ea580c,#c2410c)"}:{})}} onClick={submit} disabled={loading}>
-            {loading ? "⏳ กำลังบันทึก..." : upsell ? "🔥 ส่งไป Upsell" : "✅ ส่งไป Orders"}
+          <button style={S.cancelBtn} onClick={onCancel} disabled={saving}>ยกเลิก</button>
+          <button style={{...S.submitBtn,...(upsell?{background:"linear-gradient(135deg,#ea580c,#c2410c)"}:{}),opacity:saving?.7:1}} onClick={submit} disabled={saving}>
+            {saving ? "⏳ กำลังบันทึก..." : upsell ? "🔥 ส่งไป Upsell" : "✅ ส่งไป Orders"}
           </button>
         </div>
+      </div>}
+
+      {/* Saving Overlay */}
+      {saving && <div style={{position:"absolute",inset:0,zIndex:10,background:"rgba(255,255,255,.85)",borderRadius:16,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12}}>
+        <div style={{width:48,height:48,border:"4px solid #fde68a",borderTopColor:"#d97706",borderRadius:"50%",animation:"spin .8s linear infinite"}}/>
+        <div style={{fontSize:16,fontWeight:700,color:"#d97706"}}>กำลังบันทึกออเดอร์...</div>
+        <div style={{fontSize:13,color:"#94a3b8"}}>กรุณารอสักครู่</div>
       </div>}
 
       {!parsed && <div style={{marginTop:14,textAlign:"center"}}><button onClick={function(){setParsed(true);}} style={{background:"none",border:"none",color:"#d97706",fontWeight:600,cursor:"pointer",fontSize:13}}>✏️ กรอกเองทีละช่อง</button></div>}
