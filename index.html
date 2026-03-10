@@ -199,7 +199,7 @@ function App() {
 
       <aside style={S.sidebar}>
         <div style={S.sidebarHead}><img src="LOGO_THEMT.png" alt="THE MT" style={{width:44,height:44,objectFit:"contain"}}/><div><div style={{fontSize:20,fontWeight:800,color:"#fde68a"}}>THE MT</div><div style={{fontSize:10,color:"#fbbf24",letterSpacing:1}}>SYSTEM TELESALE</div></div></div>
-        <div style={S.userCard}><div style={S.avatar}>{(user.displayName||"?")[0]}</div><div><div style={{fontWeight:700,fontSize:14}}>{user.displayName}</div><div style={{fontSize:11,color:"#fcd34d"}}>@{user.username}</div><span style={{padding:"2px 8px",borderRadius:6,fontSize:10,fontWeight:700,background:isAdmin?"rgba(250,204,21,.2)":"rgba(251,191,36,.2)",color:isAdmin?"#fbbf24":"#fcd34d"}}>{isAdmin?"แอดมิน":"พนักงาน"}</span></div></div>
+        <div style={S.userCard}><div style={S.avatar}>{(user.displayName||"?")[0]}</div><div><div style={{fontWeight:700,fontSize:14}}>{user.displayName}</div><div style={{fontSize:11,color:"#fcd34d"}}>📧 {user.username}</div><span style={{padding:"2px 8px",borderRadius:6,fontSize:10,fontWeight:700,background:isAdmin?"rgba(250,204,21,.2)":"rgba(251,191,36,.2)",color:isAdmin?"#fbbf24":"#fcd34d"}}>{isAdmin?"แอดมิน":"พนักงาน"}</span></div></div>
         <nav style={S.nav}>
           {[{id:"orders",icon:"📋",label:"ออเดอร์"},{id:"report",icon:"📊",label:"รายงาน"}].concat(isAdmin?[{id:"team",icon:"👥",label:"จัดการบัญชี"}]:[]).map(function(item){return(
             <button key={item.id} style={{...S.navItem,...(page===item.id?S.navActive:{})}} onClick={function(){setPage(item.id);}}><span style={{fontSize:18}}>{item.icon}</span> {item.label}</button>
@@ -255,9 +255,9 @@ function LoginScreen({accounts,onLogin,onReload,onSetup}) {
   var ref = useRef(null);
   function shake(){if(ref.current){ref.current.classList.remove("shake");void ref.current.offsetWidth;ref.current.classList.add("shake");}}
   function go() {
-    if(!username||!password){setError("กรอก Username และ Password");shake();return;}
+    if(!username||!password){setError("กรอก Email และ Password");shake();return;}
     var acc=accounts.find(function(a){return a.username===username;});
-    if(!acc){setError("ไม่พบ Username");shake();return;}
+    if(!acc){setError("ไม่พบ Email นี้ในระบบ");shake();return;}
     if(!acc.active){setError("บัญชีถูกระงับ");shake();return;}
     if(String(acc.password)!==String(password)){setError("Password ไม่ถูกต้อง");shake();return;}
     onLogin(acc);
@@ -265,7 +265,7 @@ function LoginScreen({accounts,onLogin,onReload,onSetup}) {
   return (
     <div style={S.loginBg}><div ref={ref} style={S.loginCard}>
       <div style={{textAlign:"center",marginBottom:36}}><img src="LOGO_THEMT.png" alt="THE MT" style={{width:120,height:120,objectFit:"contain",marginBottom:8}}/><h1 style={{fontSize:28,fontWeight:800,color:"#1a1409",margin:"0 0 6px"}}>SYSTEM TELESALE THE MT</h1><p style={{fontSize:14,color:"#64748b"}}>Google Sheets CRM</p><div style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:8,padding:"4px 12px",borderRadius:8,background:"#d1fae5",color:"#059669",fontSize:12,fontWeight:600}}>🟢 เชื่อมต่อแล้ว</div></div>
-      <div style={{marginBottom:20}}><label style={S.fLabel}>👤 Username</label><input value={username} onChange={function(e){setUsername(e.target.value);setError("");}} onKeyDown={function(e){if(e.key==="Enter"){var el=document.getElementById("pw");if(el)el.focus();}}} placeholder="ชื่อผู้ใช้" autoFocus style={{...S.pInput,padding:"12px 16px",fontSize:15}}/></div>
+      <div style={{marginBottom:20}}><label style={S.fLabel}>📧 Email</label><input value={username} onChange={function(e){setUsername(e.target.value);setError("");}} onKeyDown={function(e){if(e.key==="Enter"){var el=document.getElementById("pw");if(el)el.focus();}}} placeholder="อีเมล" autoFocus type="email" autoComplete="email" style={{...S.pInput,padding:"12px 16px",fontSize:15}}/></div>
       <div style={{marginBottom:24}}><label style={S.fLabel}>🔒 Password</label><div style={{position:"relative"}}><input id="pw" type={showPw?"text":"password"} value={password} onChange={function(e){setPassword(e.target.value);setError("");}} onKeyDown={function(e){if(e.key==="Enter")go();}} placeholder="รหัสผ่าน" style={{...S.pInput,padding:"12px 48px 12px 16px",fontSize:15}}/><button onClick={function(){setShowPw(!showPw);}} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",border:"none",background:"none",cursor:"pointer",fontSize:18,color:"#94a3b8"}}>{showPw?"🙈":"👁"}</button></div></div>
       {error && <div style={{background:"#fef2f2",color:"#dc2626",padding:"10px 14px",borderRadius:10,fontSize:13,fontWeight:600,marginBottom:16,border:"1px solid #fecaca"}}>❌ {error}</div>}
       <button onClick={go} style={{width:"100%",padding:14,borderRadius:12,border:"none",background:"linear-gradient(135deg,#d97706,#f59e0b)",color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer",marginBottom:16}}>เข้าสู่ระบบ</button>
@@ -592,7 +592,7 @@ function TeamPage({accounts,onAdd,onToggle,onToggleUpsell,onSaveUpsellBatch,onDe
       {/* Add Account Form */}
       {show && <div style={{...S.formCard,animation:"slideDown .3s"}}><h3 style={{margin:"0 0 16px",fontSize:16,fontWeight:700}}>➕ สร้างบัญชีใหม่</h3>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
-          <div><label style={S.fLabel}>🆔 Username</label><input value={nf.username} onChange={function(e){setNf({...nf,username:e.target.value});}} style={S.pInput}/></div>
+          <div><label style={S.fLabel}>📧 Email</label><input value={nf.username} onChange={function(e){setNf({...nf,username:e.target.value});}} placeholder="email@example.com" type="email" style={S.pInput}/></div>
           <div><label style={S.fLabel}>👤 ชื่อ</label><input value={nf.displayName} onChange={function(e){setNf({...nf,displayName:e.target.value});}} style={S.pInput}/></div>
           <div><label style={S.fLabel}>🔒 Password</label><input type="password" value={nf.password} onChange={function(e){setNf({...nf,password:e.target.value});}} style={S.pInput}/></div>
           <div><label style={S.fLabel}>🏷 บทบาท</label><select value={nf.role} onChange={function(e){setNf({...nf,role:e.target.value});}} style={S.pInput}><option value="user">พนักงาน</option><option value="admin">แอดมิน</option></select></div>
@@ -601,13 +601,13 @@ function TeamPage({accounts,onAdd,onToggle,onToggleUpsell,onSaveUpsellBatch,onDe
       </div>}
 
       {/* Reset PW Modal */}
-      {resetId && <div style={S.modalOverlay} onClick={function(){setResetId(null);}}><div style={{background:"#fff",borderRadius:16,padding:28,width:"100%",maxWidth:400}} onClick={function(e){e.stopPropagation();}}><h3 style={{margin:"0 0 16px",fontSize:16,fontWeight:700}}>🔑 รีเซ็ต PW — @{resetId}</h3><input type="password" value={newPw} onChange={function(e){setNewPw(e.target.value);}} placeholder="Password ใหม่" style={{...S.pInput,marginBottom:16}}/><div style={{display:"flex",gap:10,justifyContent:"flex-end"}}><button style={S.cancelBtn} onClick={function(){setResetId(null);}}>ยกเลิก</button><button style={S.submitBtn} onClick={function(){if(newPw.length<4){alert("อย่างน้อย 4 ตัว");return;}onResetPw(resetId,newPw);setResetId(null);setNewPw("");}}>บันทึก</button></div></div></div>}
+      {resetId && <div style={S.modalOverlay} onClick={function(){setResetId(null);}}><div style={{background:"#fff",borderRadius:16,padding:28,width:"100%",maxWidth:400}} onClick={function(e){e.stopPropagation();}}><h3 style={{margin:"0 0 16px",fontSize:16,fontWeight:700}}>🔑 รีเซ็ต PW — {resetId}</h3><input type="password" value={newPw} onChange={function(e){setNewPw(e.target.value);}} placeholder="Password ใหม่" style={{...S.pInput,marginBottom:16}}/><div style={{display:"flex",gap:10,justifyContent:"flex-end"}}><button style={S.cancelBtn} onClick={function(){setResetId(null);}}>ยกเลิก</button><button style={S.submitBtn} onClick={function(){if(newPw.length<4){alert("อย่างน้อย 4 ตัว");return;}onResetPw(resetId,newPw);setResetId(null);setNewPw("");}}>บันทึก</button></div></div></div>}
 
       {/* Edit Account Modal */}
       {editAcc && <div style={S.modalOverlay} onClick={function(){setEditAcc(null);}}><div style={{background:"#fff",borderRadius:16,padding:28,width:"100%",maxWidth:440}} onClick={function(e){e.stopPropagation();}}>
-        <h3 style={{margin:"0 0 20px",fontSize:16,fontWeight:700}}>✏️ แก้ไขบัญชี — @{editAcc.oldUsername}</h3>
+        <h3 style={{margin:"0 0 20px",fontSize:16,fontWeight:700}}>✏️ แก้ไขบัญชี — {editAcc.oldUsername}</h3>
         <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:20}}>
-          <div><label style={S.fLabel}>🆔 Username</label><input value={editAcc.username} onChange={function(e){setEditAcc({...editAcc,username:e.target.value});}} style={S.pInput}/></div>
+          <div><label style={S.fLabel}>📧 Email</label><input value={editAcc.username} onChange={function(e){setEditAcc({...editAcc,username:e.target.value});}} placeholder="email@example.com" type="email" style={S.pInput}/></div>
           <div><label style={S.fLabel}>👤 ชื่อที่แสดง</label><input value={editAcc.displayName} onChange={function(e){setEditAcc({...editAcc,displayName:e.target.value});}} style={S.pInput}/></div>
           <div><label style={S.fLabel}>🏷 บทบาท</label><select value={editAcc.role} onChange={function(e){setEditAcc({...editAcc,role:e.target.value});}} style={S.pInput}><option value="user">พนักงาน</option><option value="admin">แอดมิน</option></select></div>
         </div>
@@ -721,7 +721,7 @@ function AccCard({a,onToggle,onDel,onReset,onEdit,prot}){return(
       <div style={{width:44,height:44,borderRadius:"50%",background:"#fffbeb",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:800,color:"#d97706"}}>{(a.displayName||"?")[0]}</div>
       <div style={{flex:1}}>
         <div style={{fontWeight:700,fontSize:14}}>{a.displayName||""}</div>
-        <div style={{fontSize:11,color:"#94a3b8"}}>@{a.username}</div>
+        <div style={{fontSize:11,color:"#94a3b8"}}>📧 {a.username}</div>
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
         <div style={{padding:"3px 8px",borderRadius:6,fontSize:10,fontWeight:700,background:a.active?"#d1fae5":"#fee2e2",color:a.active?"#059669":"#ef4444"}}>{a.active?"ใช้งาน":"ระงับ"}</div>
