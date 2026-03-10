@@ -575,7 +575,8 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
         <div onClick={function(){
           var next=!isTransfer;
           setIsTransfer(next);
-          if(next) set("COD","0");
+          if(next){ set("COD","0"); }
+          else { setSlipPreview(null); }
         }} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 18px",borderRadius:12,border:isTransfer?"2px solid #2563eb":"2px solid #e2e8f0",background:isTransfer?"#eff6ff":"#fafbff",cursor:"pointer",marginBottom:12,userSelect:"none",transition:"all .2s"}}>
           <div style={{width:44,height:26,borderRadius:13,background:isTransfer?"#2563eb":"#cbd5e1",position:"relative",transition:"background .2s",flexShrink:0}}>
             <div style={{width:22,height:22,borderRadius:11,background:"#fff",position:"absolute",top:2,left:isTransfer?20:2,transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}/>
@@ -587,8 +588,8 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
         </div>
         <div style={{marginBottom:16}}><PF i="📝" l="หมายเหตุ/สินค้า *" v={f.Remark} c={function(v){set("Remark",v);}}/></div>
 
-        {/* 🧾 อัพโหลดสลิป */}
-        <div style={{border:"2px dashed #fde68a",borderRadius:14,padding:20,background:"#fffbeb",textAlign:"center",marginBottom:16}}>
+        {/* 🧾 อัพโหลดสลิป — เฉพาะโอนเงิน */}
+        {isTransfer && <div style={{border:"2px dashed #fde68a",borderRadius:14,padding:20,background:"#fffbeb",textAlign:"center",marginBottom:16}}>
           <input ref={slipRef} type="file" accept="image/*" onChange={function(e){var file=e.target.files&&e.target.files[0];if(!file)return;if(file.size>5*1024*1024){alert("ไฟล์ใหญ่เกิน 5MB");return;}var reader=new FileReader();reader.onload=function(ev){setSlipPreview(ev.target.result);};reader.readAsDataURL(file);}} style={{display:"none"}}/>
           {slipPreview
             ? <div>
@@ -600,12 +601,12 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
               </div>
             : <div>
                 <div style={{fontSize:36,marginBottom:8}}>🧾</div>
-                <p style={{fontSize:13,color:"#94a3b8",marginBottom:10}}>อัพโหลดสลิปโอนเงิน (ไม่บังคับ)</p>
+                <p style={{fontSize:13,color:"#94a3b8",marginBottom:10}}>อัพโหลดสลิปโอนเงิน</p>
                 <button type="button" onClick={function(){slipRef.current.click();}} style={{padding:"10px 24px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#d97706,#f59e0b)",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>📎 เลือกไฟล์</button>
                 <p style={{fontSize:11,color:"#cbd5e1",marginTop:6}}>JPG, PNG สูงสุด 5MB</p>
               </div>
           }
-        </div>
+        </div>}
 
         {/* 🔥 UPSELL */}
         {(user.canUpsell || user.role==="admin") && <div onClick={function(){setUpsell(!upsell);}} style={{display:"flex",alignItems:"center",gap:14,padding:"16px 20px",borderRadius:14,border:upsell?"2px solid #ea580c":"2px solid #e2e8f0",background:upsell?"linear-gradient(135deg,#fff7ed,#ffedd5)":"#fafbff",cursor:"pointer",marginBottom:16,transition:"all .2s",userSelect:"none"}}>
