@@ -32,7 +32,7 @@ var useEffect = React.useEffect;
 var useRef = React.useRef;
 
 /* ===== API ===== */
-var DEFAULT_API = "https://script.google.com/macros/s/AKfycbzGxIf9i2sKpS0RRBkRztIZtg4z52kjIpfr4BekR1VVeqhhCRfd2ER75GUMjgKawGUH-Q/exec";
+var DEFAULT_API = "https://script.google.com/macros/s/AKfycbzuRBkio4uGrAXEEvMrTE0Kz6LXYx9twRj7Sr-fHCnBjgolhgcyG7zXfDO1Pt9Vhbr4eQ/exec";
 // ล้าง URL เก่าที่ cache ไว้ ให้ใช้ DEFAULT_API เสมอ
 try { var _old = localStorage.getItem("ps_api"); if(_old && _old !== DEFAULT_API) localStorage.removeItem("ps_api"); } catch(e){}
 function getApiUrl(){ return localStorage.getItem("ps_api") || DEFAULT_API; }
