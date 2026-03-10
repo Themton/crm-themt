@@ -153,6 +153,7 @@ function App() {
 
   async function addOrder(data) {
     setShowForm(false);
+    var slipData = data.slipData || "";
     var payload = {SalesPerson:user.displayName, SalesChannel:"CRM",
       MobileNo:data.MobileNo, Name:data.Name, Address:data.Address, SubDistrict:data.SubDistrict,
       District:data.District, ZIP:data.ZIP, CustomerFBLine:data.CustomerFBLine||"",
@@ -160,15 +161,20 @@ function App() {
       upsell: data.upsell ? true : false};
     try {
       var res = await api("addOrder",null,payload);
-      notify("✅ " + res.orderId + (data.upsell ? " → 🔥 Upsell" : " → Orders"));
-      // เพิ่มเข้า local state ทันทีเพื่อให้เห็นในตาราง
+      var orderId = res.orderId;
+      notify("✅ " + orderId + (data.upsell ? " → 🔥 Upsell" : " → Orders"));
+      // เพิ่มเข้า local state ทันที
       if (!data.upsell) {
         var now = new Date();
         var ts = now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0")+" "+String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0")+":"+String(now.getSeconds()).padStart(2,"0");
-        setOrders(function(prev){return [{OrderID:res.orderId,Timestamp:ts,MobileNo:data.MobileNo,Name:data.Name,Address:data.Address,SubDistrict:data.SubDistrict,District:data.District,ZIP:data.ZIP,CustomerFBLine:data.CustomerFBLine||"",SalesChannel:"CRM",SalesPerson:user.displayName,SalePrice:data.SalePrice,COD:data.COD,Remark:data.Remark,SlipURL:""}].concat(prev);});
+        setOrders(function(prev){return [{OrderID:orderId,Timestamp:ts,MobileNo:data.MobileNo,Name:data.Name,Address:data.Address,SubDistrict:data.SubDistrict,District:data.District,ZIP:data.ZIP,CustomerFBLine:data.CustomerFBLine||"",SalesChannel:"CRM",SalesPerson:user.displayName,SalePrice:data.SalePrice,COD:data.COD,Remark:data.Remark,SlipURL:""}].concat(prev);});
       }
-      // โหลดจาก server ใน background เพื่อ sync
-      loadOrders();
+      // อัพโหลดสลิปถ้ามี
+      if (slipData) {
+        uploadSlip(orderId, slipData);
+      } else {
+        loadOrders();
+      }
     } catch(e) { notify(e.message,"warning"); }
   }
   async function delOrder(oid) {
@@ -464,6 +470,9 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
   var [upsell,setUpsell] = useState(false);
   var [selectedProduct,setSelectedProduct] = useState("");
   var [selectedBrand,setSelectedBrand] = useState("");
+  var slipRef = useRef(null);
+  var [slipPreview,setSlipPreview] = useState(null);
+  var [isTransfer,setIsTransfer] = useState(false);
 
   function handleText(t) {
     setRaw(t);
@@ -479,10 +488,9 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
     if (!name) return;
     var prod = (products||[]).find(function(p){return p.name===name;});
     if (prod) {
-      // ตัด [category] ออกจาก Remark
       var shortName = name.replace(/^\[[^\]]+\]\s*/,"");
       set("SalePrice", String(prod.price));
-      set("COD", String(prod.price));
+      if (!isTransfer) set("COD", String(prod.price));
       set("Remark", shortName + " ปลายทาง");
     }
   }
@@ -496,12 +504,13 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
     if(!f.District) missing.push("อำเภอ");
     if(!f.ZIP) missing.push("รหัส ปณ.");
     if(!f.SalePrice) missing.push("ราคาขาย");
-    if(!f.COD && f.COD!=="0") missing.push("ยอด COD");
+    if(!isTransfer && !f.COD && f.COD!=="0") missing.push("ยอด COD");
     if(!f.Remark) missing.push("หมายเหตุ/สินค้า");
     if(missing.length>0){alert("กรุณากรอกให้ครบ:\n• "+missing.join("\n• "));return;}
-    onSubmit({...f, upsell:upsell});
+    var finalCOD = isTransfer ? "0" : f.COD;
+    onSubmit({...f, COD:finalCOD, upsell:upsell, slipData:slipPreview||""});
   }
-  function clear(){setRaw("");setF({MobileNo:"",Name:"",Address:"",SubDistrict:"",District:"",ZIP:"",CustomerFBLine:"",SalePrice:"",COD:"",Remark:""});setParsed(false);setUpsell(false);setSelectedProduct("");setSelectedBrand("");}
+  function clear(){setRaw("");setF({MobileNo:"",Name:"",Address:"",SubDistrict:"",District:"",ZIP:"",CustomerFBLine:"",SalePrice:"",COD:"",Remark:""});setParsed(false);setUpsell(false);setSelectedProduct("");setSelectedBrand("");setSlipPreview(null);setIsTransfer(false);}
 
   return (
     <div style={{...S.formCard,animation:"slideDown .3s"}}>
@@ -553,8 +562,50 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
           </div>}
         </div>
 
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}><PF i="💰" l="ราคาขาย *" v={f.SalePrice} c={function(v){set("SalePrice",v);}}/><PF i="💵" l="ยอด COD *" v={f.COD} c={function(v){set("COD",v);}}/></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+          <PF i="💰" l="ราคาขาย *" v={f.SalePrice} c={function(v){set("SalePrice",v);}}/>
+          <div>
+            <label style={{...S.fLabel,color:!isTransfer&&!f.COD?"#ef4444":S.fLabel.color}}>💵 ยอด COD {isTransfer?"":"*"}</label>
+            <input value={isTransfer?"0":f.COD||""} onChange={function(e){if(!isTransfer)set("COD",e.target.value);}} disabled={isTransfer}
+              style={{...S.pInput,borderColor:isTransfer?"#d1d5db":(!f.COD&&!isTransfer)?"#fca5a5":f.COD?"#fcd34d":"#e2e8f0",background:isTransfer?"#f3f4f6":f.COD?"#fffbeb":"#fff",color:isTransfer?"#9ca3af":"#1e293b"}}/>
+          </div>
+        </div>
+
+        {/* 💳 โอนเงิน Toggle */}
+        <div onClick={function(){
+          var next=!isTransfer;
+          setIsTransfer(next);
+          if(next) set("COD","0");
+        }} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 18px",borderRadius:12,border:isTransfer?"2px solid #2563eb":"2px solid #e2e8f0",background:isTransfer?"#eff6ff":"#fafbff",cursor:"pointer",marginBottom:12,userSelect:"none",transition:"all .2s"}}>
+          <div style={{width:44,height:26,borderRadius:13,background:isTransfer?"#2563eb":"#cbd5e1",position:"relative",transition:"background .2s",flexShrink:0}}>
+            <div style={{width:22,height:22,borderRadius:11,background:"#fff",position:"absolute",top:2,left:isTransfer?20:2,transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}/>
+          </div>
+          <div>
+            <div style={{fontSize:14,fontWeight:700,color:isTransfer?"#1d4ed8":"#64748b"}}>💳 โอนเงิน</div>
+            <div style={{fontSize:12,color:isTransfer?"#3b82f6":"#94a3b8"}}>{isTransfer?"ลูกค้าโอนเงินแล้ว — COD = 0":"เก็บเงินปลายทาง (COD)"}</div>
+          </div>
+        </div>
         <div style={{marginBottom:16}}><PF i="📝" l="หมายเหตุ/สินค้า *" v={f.Remark} c={function(v){set("Remark",v);}}/></div>
+
+        {/* 🧾 อัพโหลดสลิป */}
+        <div style={{border:"2px dashed #fde68a",borderRadius:14,padding:20,background:"#fffbeb",textAlign:"center",marginBottom:16}}>
+          <input ref={slipRef} type="file" accept="image/*" onChange={function(e){var file=e.target.files&&e.target.files[0];if(!file)return;if(file.size>5*1024*1024){alert("ไฟล์ใหญ่เกิน 5MB");return;}var reader=new FileReader();reader.onload=function(ev){setSlipPreview(ev.target.result);};reader.readAsDataURL(file);}} style={{display:"none"}}/>
+          {slipPreview
+            ? <div>
+                <img src={slipPreview} alt="slip" style={{maxWidth:200,maxHeight:200,borderRadius:10,objectFit:"cover",border:"2px solid #fef3c7",marginBottom:10}}/>
+                <div style={{display:"flex",gap:8,justifyContent:"center"}}>
+                  <button type="button" onClick={function(){slipRef.current.click();}} style={{...S.sm,background:"#fffbeb",color:"#d97706"}}>🔄 เปลี่ยน</button>
+                  <button type="button" onClick={function(){setSlipPreview(null);}} style={{...S.sm,background:"#fee2e2",color:"#ef4444"}}>🗑 ลบ</button>
+                </div>
+              </div>
+            : <div>
+                <div style={{fontSize:36,marginBottom:8}}>🧾</div>
+                <p style={{fontSize:13,color:"#94a3b8",marginBottom:10}}>อัพโหลดสลิปโอนเงิน (ไม่บังคับ)</p>
+                <button type="button" onClick={function(){slipRef.current.click();}} style={{padding:"10px 24px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#d97706,#f59e0b)",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>📎 เลือกไฟล์</button>
+                <p style={{fontSize:11,color:"#cbd5e1",marginTop:6}}>JPG, PNG สูงสุด 5MB</p>
+              </div>
+          }
+        </div>
 
         {/* 🔥 UPSELL */}
         {(user.canUpsell || user.role==="admin") && <div onClick={function(){setUpsell(!upsell);}} style={{display:"flex",alignItems:"center",gap:14,padding:"16px 20px",borderRadius:14,border:upsell?"2px solid #ea580c":"2px solid #e2e8f0",background:upsell?"linear-gradient(135deg,#fff7ed,#ffedd5)":"#fafbff",cursor:"pointer",marginBottom:16,transition:"all .2s",userSelect:"none"}}>
