@@ -211,7 +211,7 @@ function App() {
 
       <main style={S.main}>
         {page==="orders" && <OrdersPage orders={filtered} stats={stats} search={search} setSearch={setSearch} showForm={showForm} setShowForm={setShowForm} onAdd={addOrder} onDel={delOrder} user={user} viewOrder={viewOrder} setViewOrder={setViewOrder} isAdmin={isAdmin} loading={loading} products={products}/>}
-        {page==="report" && <ReportPage user={user} reportType={reportType} setReportType={setReportType}/>}
+        {page==="report" && <ReportPage user={user} reportType={reportType} setReportType={setReportType} accounts={accounts}/>}
         {page==="team" && isAdmin && <TeamPage accounts={accounts} onAdd={addAcc} onToggle={toggleAcc} onToggleUpsell={toggleUpsell} onSaveUpsellBatch={saveUpsellBatch} onDel={delAcc} onResetPw={resetPw} onEditAcc={editAcc} products={products} onAddProduct={addProduct} onDelProduct={delProduct}/>}
       </main>
     </div>
@@ -740,30 +740,118 @@ function AccCard({a,onToggle,onDel,onReset,onEdit,prot}){return(
 );}
 
 /* ===== REPORT ===== */
-function ReportPage({user,reportType,setReportType}) {
+function ReportPage({user,reportType,setReportType,accounts}) {
+  var isAdmin = user.role==="admin";
   var [data,setData] = useState([]);
   var [summary,setSummary] = useState({totalOrders:0,totalSales:0,totalCOD:0});
   var [loading,setLoading] = useState(true);
-  useEffect(function(){
+  var [filterPerson,setFilterPerson] = useState("ALL"); // "ALL" or displayName
+  var [period,setPeriod] = useState("7day"); // "7day" or "monthly"
+
+  function loadReport(p,per) {
     setLoading(true);
-    var uid = user.role==="admin"?"ALL":user.displayName;
-    api("getSalesReport",{type:reportType,userId:uid}).then(function(r){setData(r.report||[]);setSummary(r.summary||{});setLoading(false);}).catch(function(){setLoading(false);});
-  },[reportType]);
+    var uid = isAdmin ? (p||"ALL") : user.displayName;
+    var type = (per||period)==="7day" ? "daily" : "monthly";
+    api("getSalesReport",{type:type,userId:uid}).then(function(r){
+      var rpt = r.report||[];
+      // ถ้า 7 วัน → ตัดเอาแค่ 7 วันล่าสุด
+      if ((per||period)==="7day") rpt = rpt.slice(0,7);
+      setData(rpt);
+      setSummary(r.summary||{});
+      setLoading(false);
+    }).catch(function(){setLoading(false);});
+  }
+
+  useEffect(function(){ loadReport(filterPerson,period); },[]);
+
+  function changePerson(v){ setFilterPerson(v); loadReport(v,period); }
+  function changePeriod(v){ setPeriod(v); loadReport(filterPerson,v); }
+
   var mx = 1; data.forEach(function(d){if(d.totalSales>mx)mx=d.totalSales;});
+
+  // สรุปยอดแต่ละคน (จากข้อมูลที่โหลดมา)
+  var personStats = {};
+  data.forEach(function(d){
+    if(d.people){
+      Object.keys(d.people).forEach(function(p){
+        if(!personStats[p]) personStats[p]={name:p,orders:0,sales:0};
+        personStats[p].orders += d.people[p];
+      });
+    }
+  });
+  // คำนวณยอดขายแต่ละคนจาก totalSales (ถ้าดู ALL)
+  // ใช้ people count * average เป็น estimate
+
   return (
     <div>
-      <div style={S.pageHeader}><div><h1 style={S.pageTitle}>📊 รายงานยอดขาย</h1></div><div style={{display:"flex",gap:6}}>{["daily","monthly"].map(function(t){return <button key={t} onClick={function(){setReportType(t);}} style={{padding:"10px 18px",borderRadius:10,border:"1px solid #e2e8f0",fontSize:13,fontWeight:600,cursor:"pointer",background:reportType===t?"#6366f1":"#fff",color:reportType===t?"#fff":"#64748b"}}>{t==="daily"?"📅 รายวัน":"📆 รายเดือน"}</button>;})}</div></div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:16,marginBottom:24}}>
-        {[{i:"📦",l:"ออเดอร์",v:summary.totalOrders,c:"#6366f1"},{i:"💰",l:"ยอดขาย",v:"฿"+(summary.totalSales||0).toLocaleString(),c:"#10b981"},{i:"💵",l:"COD",v:"฿"+(summary.totalCOD||0).toLocaleString(),c:"#f59e0b"},{i:"📈",l:"เฉลี่ย",v:summary.totalOrders?"฿"+Math.round(summary.totalSales/summary.totalOrders).toLocaleString():"฿0",c:"#8b5cf6"}].map(function(s,i){return <div key={i} style={{padding:24,borderRadius:16,border:"1px solid "+s.c+"33",background:"linear-gradient(135deg,"+s.c+"08,"+s.c+"15)",textAlign:"center"}}><div style={{fontSize:32}}>{s.i}</div><div style={{fontSize:26,fontWeight:800,color:s.c,margin:"8px 0 4px"}}>{s.v}</div><div style={{fontSize:13,color:"#64748b"}}>{s.l}</div></div>;})}
+      <div style={S.pageHeader}>
+        <div><h1 style={S.pageTitle}>📊 รายงานยอดขาย</h1><p style={{fontSize:14,color:"#64748b",margin:"4px 0 0"}}>{filterPerson==="ALL"?"ทุกคน":filterPerson} • {period==="7day"?"7 วันล่าสุด":"รายเดือน"}</p></div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {/* Period Toggle */}
+          {["7day","monthly"].map(function(t){return <button key={t} onClick={function(){changePeriod(t);}} style={{padding:"10px 18px",borderRadius:10,border:"1px solid #e2e8f0",fontSize:13,fontWeight:600,cursor:"pointer",background:period===t?"#6366f1":"#fff",color:period===t?"#fff":"#64748b"}}>{t==="7day"?"📅 7 วัน":"📆 รายเดือน"}</button>;})}
+        </div>
       </div>
+
+      {/* Admin: เลือกดูรายคน */}
+      {isAdmin && <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap",alignItems:"center"}}>
+        <span style={{fontSize:13,fontWeight:600,color:"#475569"}}>👤 ดูยอดของ:</span>
+        <button onClick={function(){changePerson("ALL");}} style={{padding:"8px 16px",borderRadius:8,border:filterPerson==="ALL"?"2px solid #6366f1":"2px solid #e2e8f0",background:filterPerson==="ALL"?"#eef2ff":"#fff",color:filterPerson==="ALL"?"#6366f1":"#64748b",fontSize:13,fontWeight:600,cursor:"pointer"}}>ทุกคน</button>
+        {(accounts||[]).filter(function(a){return a.active;}).map(function(a){
+          var active = filterPerson===a.displayName;
+          return <button key={a.username} onClick={function(){changePerson(a.displayName);}} style={{padding:"8px 16px",borderRadius:8,border:active?"2px solid #6366f1":"2px solid #e2e8f0",background:active?"#eef2ff":"#fff",color:active?"#6366f1":"#64748b",fontSize:13,fontWeight:600,cursor:"pointer"}}>{a.displayName}</button>;
+        })}
+      </div>}
+
+      {/* Summary Cards */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:16,marginBottom:24}}>
+        {[{i:"📦",l:"ออเดอร์",v:summary.totalOrders||0,c:"#6366f1"},{i:"💰",l:"ยอดขาย",v:"฿"+(summary.totalSales||0).toLocaleString(),c:"#10b981"},{i:"💵",l:"COD",v:"฿"+(summary.totalCOD||0).toLocaleString(),c:"#f59e0b"},{i:"📈",l:"เฉลี่ย/ออเดอร์",v:summary.totalOrders?"฿"+Math.round((summary.totalSales||0)/(summary.totalOrders||1)).toLocaleString():"฿0",c:"#8b5cf6"}].map(function(s,i){return <div key={i} style={{padding:20,borderRadius:16,border:"1px solid "+s.c+"33",background:"linear-gradient(135deg,"+s.c+"08,"+s.c+"15)",textAlign:"center"}}><div style={{fontSize:28}}>{s.i}</div><div style={{fontSize:24,fontWeight:800,color:s.c,margin:"6px 0 2px"}}>{s.v}</div><div style={{fontSize:12,color:"#64748b"}}>{s.l}</div></div>;})}
+      </div>
+
+      {/* ยอดแต่ละพนักงาน (เฉพาะ admin ดู ALL) */}
+      {isAdmin && filterPerson==="ALL" && <div style={{background:"#fff",borderRadius:16,padding:20,marginBottom:24,border:"1px solid #e0e7ff"}}>
+        <h3 style={{fontSize:15,fontWeight:700,margin:"0 0 14px",color:"#475569"}}>👥 สรุปยอดแต่ละพนักงาน</h3>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:10}}>
+          {Object.keys(personStats).length===0 && <div style={{color:"#94a3b8",fontSize:13}}>ไม่มีข้อมูล</div>}
+          {Object.keys(personStats).map(function(name){
+            var ps = personStats[name];
+            return <div key={name} onClick={function(){changePerson(name);}} style={{padding:"14px 18px",borderRadius:12,background:"#f8fafc",border:"1.5px solid #e2e8f0",cursor:"pointer",transition:"all .15s"}}
+              onMouseEnter={function(e){e.currentTarget.style.borderColor="#6366f1";e.currentTarget.style.background="#eef2ff";}}
+              onMouseLeave={function(e){e.currentTarget.style.borderColor="#e2e8f0";e.currentTarget.style.background="#f8fafc";}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <span style={{fontWeight:700,fontSize:14,color:"#1e293b"}}>{name}</span>
+                <span style={{padding:"2px 8px",borderRadius:6,background:"#eef2ff",color:"#6366f1",fontSize:11,fontWeight:700}}>{ps.orders} ออเดอร์</span>
+              </div>
+              <div style={{fontSize:12,color:"#64748b"}}>กดเพื่อดูรายละเอียด →</div>
+            </div>;
+          })}
+        </div>
+      </div>}
+
+      {/* กราฟแท่ง */}
       <div style={{background:"#fff",borderRadius:16,padding:24,marginBottom:24}}>
-        {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>⏳ โหลด...</div>:data.slice(0,14).map(function(d){return(
-          <div key={d.date} style={{display:"flex",alignItems:"center",gap:12,marginBottom:8}}><div style={{width:90,fontSize:12,fontWeight:600,color:"#475569",textAlign:"right",flexShrink:0}}>{d.date}</div><div style={{flex:1,height:28,background:"#f1f5f9",borderRadius:8,overflow:"hidden"}}><div style={{height:"100%",width:(d.totalSales/mx)*100+"%",background:"linear-gradient(90deg,#6366f1,#8b5cf6)",borderRadius:8,minWidth:4}}/></div><div style={{width:130,fontSize:12,fontWeight:600,flexShrink:0}}>฿{d.totalSales.toLocaleString()} ({d.orders})</div></div>
+        <h3 style={{fontSize:15,fontWeight:700,margin:"0 0 16px",color:"#475569"}}>{period==="7day"?"ยอดขาย 7 วันล่าสุด":"ยอดขายรายเดือน"}</h3>
+        {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>⏳ โหลด...</div>:data.length===0?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>ไม่มีข้อมูล</div>:data.map(function(d){return(
+          <div key={d.date} style={{display:"flex",alignItems:"center",gap:12,marginBottom:8}}>
+            <div style={{width:90,fontSize:12,fontWeight:600,color:"#475569",textAlign:"right",flexShrink:0}}>{d.date}</div>
+            <div style={{flex:1,height:28,background:"#f1f5f9",borderRadius:8,overflow:"hidden"}}><div style={{height:"100%",width:(d.totalSales/mx)*100+"%",background:"linear-gradient(90deg,#6366f1,#8b5cf6)",borderRadius:8,minWidth:4}}/></div>
+            <div style={{width:140,fontSize:12,fontWeight:600,flexShrink:0}}>฿{d.totalSales.toLocaleString()} ({d.orders})</div>
+          </div>
         );})}
       </div>
-      <div style={S.tableWrap}><table style={S.table}><thead><tr>{["วันที่","ออเดอร์","ยอดขาย","COD","พนักงาน"].map(function(h,i){return <th key={i} style={S.th}>{h}</th>;})}</tr></thead><tbody>{data.map(function(d){return(
-        <tr key={d.date}><td style={{...S.td,fontWeight:600}}>{d.date}</td><td style={S.td}>{d.orders}</td><td style={{...S.td,fontWeight:700,color:"#6366f1"}}>฿{d.totalSales.toLocaleString()}</td><td style={S.td}>฿{d.totalCOD.toLocaleString()}</td><td style={S.td}><div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{d.people&&Object.keys(d.people).map(function(p){return <span key={p} style={{padding:"2px 8px",borderRadius:4,background:"#f0fdf4",fontSize:11,color:"#059669",fontWeight:600}}>{p}:{d.people[p]}</span>;})}</div></td></tr>
-      );})}</tbody></table></div>
+
+      {/* ตารางรายละเอียด */}
+      <div style={S.tableWrap}><table style={S.table}>
+        <thead><tr>{["วันที่","ออเดอร์","ยอดขาย","COD","พนักงาน"].map(function(h,i){return <th key={i} style={S.th}>{h}</th>;})}</tr></thead>
+        <tbody>{data.map(function(d){return(
+          <tr key={d.date}>
+            <td style={{...S.td,fontWeight:600}}>{d.date}</td>
+            <td style={S.td}>{d.orders}</td>
+            <td style={{...S.td,fontWeight:700,color:"#6366f1"}}>฿{d.totalSales.toLocaleString()}</td>
+            <td style={S.td}>฿{d.totalCOD.toLocaleString()}</td>
+            <td style={S.td}><div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{d.people&&Object.keys(d.people).map(function(p){return <span key={p} style={{padding:"2px 8px",borderRadius:4,background:"#f0fdf4",fontSize:11,color:"#059669",fontWeight:600}}>{p}:{d.people[p]}</span>;})}</div></td>
+          </tr>
+        );})}</tbody>
+      </table></div>
     </div>
   );
 }
