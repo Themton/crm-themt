@@ -152,30 +152,42 @@ function App() {
   var stats = {total:orders.length, totalSales:totalS, totalCOD:totalC};
 
   async function addOrder(data) {
-    setLoading(true);
+    setShowForm(false);
+    var payload = {SalesPerson:user.displayName, SalesChannel:"CRM",
+      MobileNo:data.MobileNo, Name:data.Name, Address:data.Address, SubDistrict:data.SubDistrict,
+      District:data.District, ZIP:data.ZIP, CustomerFBLine:data.CustomerFBLine||"",
+      SalePrice:data.SalePrice, COD:data.COD, Remark:data.Remark,
+      upsell: data.upsell ? true : false};
     try {
-      var payload = {SalesPerson:user.displayName, SalesChannel:"CRM",
-        MobileNo:data.MobileNo, Name:data.Name, Address:data.Address, SubDistrict:data.SubDistrict,
-        District:data.District, ZIP:data.ZIP, CustomerFBLine:data.CustomerFBLine||"",
-        SalePrice:data.SalePrice, COD:data.COD, Remark:data.Remark,
-        upsell: data.upsell ? true : false};
       var res = await api("addOrder",null,payload);
-      notify("สร้าง " + res.orderId + (data.upsell ? " → 🔥 ส่งไปตาราง Upsell" : " → ส่งไปตาราง Orders"));
-      setShowForm(false);
-      await loadOrders();
+      notify("✅ " + res.orderId + (data.upsell ? " → 🔥 Upsell" : " → Orders"));
+      // เพิ่มเข้า local state ทันทีเพื่อให้เห็นในตาราง
+      if (!data.upsell) {
+        var now = new Date();
+        var ts = now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0")+" "+String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0")+":"+String(now.getSeconds()).padStart(2,"0");
+        setOrders(function(prev){return [{OrderID:res.orderId,Timestamp:ts,MobileNo:data.MobileNo,Name:data.Name,Address:data.Address,SubDistrict:data.SubDistrict,District:data.District,ZIP:data.ZIP,CustomerFBLine:data.CustomerFBLine||"",SalesChannel:"CRM",SalesPerson:user.displayName,SalePrice:data.SalePrice,COD:data.COD,Remark:data.Remark,SlipURL:""}].concat(prev);});
+      }
+      // โหลดจาก server ใน background เพื่อ sync
+      loadOrders();
     } catch(e) { notify(e.message,"warning"); }
-    setLoading(false);
   }
   async function delOrder(oid) {
-    setLoading(true);
-    try { await api("deleteOrder",{orderId:oid}); notify("ลบสำเร็จ"); setViewOrder(null); await loadOrders(); } catch(e) { notify("ลบผิดพลาด","warning"); }
-    setLoading(false);
+    setViewOrder(null);
+    setOrders(function(prev){return prev.filter(function(o){return o.OrderID!==oid;});});
+    try { await api("deleteOrder",{orderId:oid}); notify("ลบสำเร็จ"); loadOrders(); } catch(e) { notify("ลบผิดพลาด","warning"); loadOrders(); }
   }
   async function uploadSlip(orderId, base64) {
     try {
+      notify("⏳ กำลังอัพโหลดสลิป...");
       var r = await api("uploadSlip",null,{orderId:orderId,base64:base64});
-      if(r.success){ notify("🧾 อัพโหลดสลิปสำเร็จ!"); await loadOrders(); return r.slipUrl; }
-      else { notify(r.error||"ผิดพลาด","warning"); return null; }
+      if(r.success){
+        notify("🧾 อัพโหลดสลิปสำเร็จ!");
+        // อัพเดท local state ทันที
+        setOrders(function(prev){return prev.map(function(o){return o.OrderID===orderId?{...o,SlipURL:r.slipUrl}:o;});});
+        setViewOrder(function(prev){return prev&&prev.OrderID===orderId?{...prev,SlipURL:r.slipUrl}:prev;});
+        loadOrders();
+        return r.slipUrl;
+      } else { notify(r.error||"ผิดพลาด","warning"); return null; }
     } catch(e) { notify("อัพโหลดสลิปผิดพลาด","warning"); return null; }
   }
   async function addAcc(acc) {
@@ -475,7 +487,20 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
     }
   }
 
-  function submit(){if(!f.MobileNo||!f.Name){alert("กรุณากรอกเบอร์มือถือและชื่อลูกค้า");return;}onSubmit({...f, upsell:upsell});}
+  function submit(){
+    var missing = [];
+    if(!f.MobileNo) missing.push("เบอร์มือถือ");
+    if(!f.Name) missing.push("ชื่อ");
+    if(!f.Address) missing.push("ที่อยู่");
+    if(!f.SubDistrict) missing.push("ตำบล");
+    if(!f.District) missing.push("อำเภอ");
+    if(!f.ZIP) missing.push("รหัส ปณ.");
+    if(!f.SalePrice) missing.push("ราคาขาย");
+    if(!f.COD && f.COD!=="0") missing.push("ยอด COD");
+    if(!f.Remark) missing.push("หมายเหตุ/สินค้า");
+    if(missing.length>0){alert("กรุณากรอกให้ครบ:\n• "+missing.join("\n• "));return;}
+    onSubmit({...f, upsell:upsell});
+  }
   function clear(){setRaw("");setF({MobileNo:"",Name:"",Address:"",SubDistrict:"",District:"",ZIP:"",CustomerFBLine:"",SalePrice:"",COD:"",Remark:""});setParsed(false);setUpsell(false);setSelectedProduct("");setSelectedBrand("");}
 
   return (
@@ -493,13 +518,13 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
       {parsed && <div style={{marginTop:20,animation:"fadeIn .3s"}}>
         <div style={{textAlign:"center",borderBottom:"2px solid #fef3c7",lineHeight:"0.1em",marginBottom:20}}><span style={{background:"#fff",padding:"0 16px",fontSize:13,fontWeight:700,color:"#d97706"}}>📋 ตรวจสอบ & แก้ไข</span></div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}><PF i="📱" l="เบอร์ *" v={f.MobileNo} c={function(v){set("MobileNo",v);}}/><PF i="👤" l="ชื่อ *" v={f.Name} c={function(v){set("Name",v);}}/></div>
-        <div style={{marginBottom:10}}><PF i="🏠" l="ที่อยู่" v={f.Address} c={function(v){set("Address",v);}}/></div>
+        <div style={{marginBottom:10}}><PF i="🏠" l="ที่อยู่ *" v={f.Address} c={function(v){set("Address",v);}}/></div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}>
-          <AddrAC label="📍 ตำบล/แขวง" value={f.SubDistrict} field="s" onSelect={function(item){set("SubDistrict",item[0]);set("District",item[1]);set("ZIP",item[3]);}} onChange={function(v){set("SubDistrict",v);}}/>
-          <AddrAC label="📍 อำเภอ/เขต" value={f.District} field="d" onSelect={function(item){set("SubDistrict",item[0]);set("District",item[1]);set("ZIP",item[3]);}} onChange={function(v){set("District",v);}}/>
-          <AddrAC label="📮 รหัส ปณ." value={f.ZIP} field="z" onSelect={function(item){set("SubDistrict",item[0]);set("District",item[1]);set("ZIP",item[3]);}} onChange={function(v){set("ZIP",v);}}/>
+          <AddrAC label="📍 ตำบล *" value={f.SubDistrict} field="s" onSelect={function(item){set("SubDistrict",item[0]);set("District",item[1]);set("ZIP",item[3]);}} onChange={function(v){set("SubDistrict",v);}}/>
+          <AddrAC label="📍 อำเภอ *" value={f.District} field="d" onSelect={function(item){set("SubDistrict",item[0]);set("District",item[1]);set("ZIP",item[3]);}} onChange={function(v){set("District",v);}}/>
+          <AddrAC label="📮 ปณ. *" value={f.ZIP} field="z" onSelect={function(item){set("SubDistrict",item[0]);set("District",item[1]);set("ZIP",item[3]);}} onChange={function(v){set("ZIP",v);}}/>
         </div>
-        <div style={{marginBottom:10}}><PF i="📱" l="FB/Line ลูกค้า" v={f.CustomerFBLine} c={function(v){set("CustomerFBLine",v);}}/></div>
+        <div style={{marginBottom:10}}><PF i="📱" l="FB/Line (ไม่บังคับ)" v={f.CustomerFBLine} c={function(v){set("CustomerFBLine",v);}}/></div>
 
         {/* 🛒 เลือกสินค้า — 2 ขั้น: แบรนด์ → โปร */}
         <div style={{marginBottom:12}}>
@@ -528,8 +553,8 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
           </div>}
         </div>
 
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}><PF i="💰" l="ราคาขาย" v={f.SalePrice} c={function(v){set("SalePrice",v);}}/><PF i="💵" l="ยอด COD" v={f.COD} c={function(v){set("COD",v);}}/></div>
-        <div style={{marginBottom:16}}><PF i="📝" l="หมายเหตุ" v={f.Remark} c={function(v){set("Remark",v);}}/></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}><PF i="💰" l="ราคาขาย *" v={f.SalePrice} c={function(v){set("SalePrice",v);}}/><PF i="💵" l="ยอด COD *" v={f.COD} c={function(v){set("COD",v);}}/></div>
+        <div style={{marginBottom:16}}><PF i="📝" l="หมายเหตุ/สินค้า *" v={f.Remark} c={function(v){set("Remark",v);}}/></div>
 
         {/* 🔥 UPSELL */}
         {(user.canUpsell || user.role==="admin") && <div onClick={function(){setUpsell(!upsell);}} style={{display:"flex",alignItems:"center",gap:14,padding:"16px 20px",borderRadius:14,border:upsell?"2px solid #ea580c":"2px solid #e2e8f0",background:upsell?"linear-gradient(135deg,#fff7ed,#ffedd5)":"#fafbff",cursor:"pointer",marginBottom:16,transition:"all .2s",userSelect:"none"}}>
@@ -555,7 +580,7 @@ function OrderForm({onSubmit,onCancel,user,isAdmin,loading,products}) {
   );
 }
 
-function PF({i,l,v,c}){return <div><label style={S.fLabel}>{i} {l}</label><input value={v||""} onChange={function(e){c(e.target.value);}} style={{...S.pInput,borderColor:v?"#fcd34d":"#e2e8f0",background:v?"#fffbeb":"#fff"}}/></div>;}
+function PF({i,l,v,c}){var req=l.indexOf("*")>=0;var empty=req&&!v;return <div><label style={{...S.fLabel,color:empty?"#ef4444":S.fLabel.color}}>{i} {l}</label><input value={v||""} onChange={function(e){c(e.target.value);}} style={{...S.pInput,borderColor:empty?"#fca5a5":v?"#fcd34d":"#e2e8f0",background:empty?"#fef2f2":v?"#fffbeb":"#fff"}}/></div>;}
 
 /* ===== DETAIL MODAL ===== */
 function DetailModal({order,onClose,onDel,onUploadSlip,isAdmin}) {
