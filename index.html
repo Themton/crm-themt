@@ -32,7 +32,7 @@ var useEffect = React.useEffect;
 var useRef = React.useRef;
 
 /* ===== API ===== */
-var DEFAULT_API = "https://script.google.com/macros/s/AKfycbwPuHoRF3hf3cMvlVl7zh2HyrErw6ZqacKyrgU0B2deJIQayQ0L5J3Hi97P7u6qi4nT3g/exec";
+var DEFAULT_API = "https://script.google.com/macros/s/AKfycbww76thYV5YYMQdDGfXpuVkCddoIBqBDNca8FY_9QyyObcB0-KDZfs9drjO10InyCmcJA/exec";
 // ล้าง URL เก่าที่ cache ไว้ ให้ใช้ DEFAULT_API เสมอ
 try { var _old = localStorage.getItem("ps_api"); if(_old && _old !== DEFAULT_API) localStorage.removeItem("ps_api"); } catch(e){}
 function getApiUrl(){ return localStorage.getItem("ps_api") || DEFAULT_API; }
@@ -770,18 +770,21 @@ function ReportPage({user,reportType,setReportType,accounts}) {
   var [summary,setSummary] = useState({totalOrders:0,totalSales:0,totalCOD:0});
   var [loading,setLoading] = useState(true);
   var [filterPerson,setFilterPerson] = useState("ALL"); // "ALL" or displayName
-  var [period,setPeriod] = useState("7day"); // "7day" or "monthly"
+  var [period,setPeriod] = useState("daily"); // "daily", "7day", "monthly"
 
   function loadReport(p,per) {
     setLoading(true);
     var uid = isAdmin ? (p||"ALL") : user.displayName;
-    var type = (per||period)==="7day" ? "daily" : "monthly";
+    var curPer = per || period;
+    var type = curPer==="monthly" ? "monthly" : "daily";
     api("getSalesReport",{type:type,userId:uid}).then(function(r){
       var rpt = r.report||[];
-      // ถ้า 7 วัน → ตัดเอาแค่ 7 วันล่าสุด
-      if ((per||period)==="7day") rpt = rpt.slice(0,7);
+      if (curPer==="7day") rpt = rpt.slice(0,7);
       setData(rpt);
-      setSummary(r.summary||{});
+      // คำนวณ summary จากข้อมูลที่แสดง (ตรงกับช่วงเวลา)
+      var s = {totalOrders:0,totalSales:0,totalCOD:0};
+      rpt.forEach(function(d){s.totalOrders+=d.orders||0;s.totalSales+=d.totalSales||0;s.totalCOD+=d.totalCOD||0;});
+      setSummary(s);
       setLoading(false);
     }).catch(function(){setLoading(false);});
   }
@@ -809,10 +812,10 @@ function ReportPage({user,reportType,setReportType,accounts}) {
   return (
     <div>
       <div style={S.pageHeader}>
-        <div><h1 style={S.pageTitle}>📊 รายงานยอดขาย</h1><p style={{fontSize:14,color:"#64748b",margin:"4px 0 0"}}>{filterPerson==="ALL"?"ทุกคน":filterPerson} • {period==="7day"?"7 วันล่าสุด":"รายเดือน"}</p></div>
+        <div><h1 style={S.pageTitle}>📊 รายงานยอดขาย</h1><p style={{fontSize:14,color:"#64748b",margin:"4px 0 0"}}>{filterPerson==="ALL"?"ทุกคน":filterPerson} • {period==="daily"?"รายวัน":period==="7day"?"7 วันล่าสุด":"รายเดือน"}</p></div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           {/* Period Toggle */}
-          {["7day","monthly"].map(function(t){return <button key={t} onClick={function(){changePeriod(t);}} style={{padding:"10px 18px",borderRadius:10,border:"1px solid #e2e8f0",fontSize:13,fontWeight:600,cursor:"pointer",background:period===t?"#d97706":"#fff",color:period===t?"#fff":"#64748b"}}>{t==="7day"?"📅 7 วัน":"📆 รายเดือน"}</button>;})}
+          {[{k:"daily",l:"📅 รายวัน"},{k:"7day",l:"📅 7 วัน"},{k:"monthly",l:"📆 รายเดือน"}].map(function(t){return <button key={t.k} onClick={function(){changePeriod(t.k);}} style={{padding:"10px 18px",borderRadius:10,border:"1px solid #e2e8f0",fontSize:13,fontWeight:600,cursor:"pointer",background:period===t.k?"#d97706":"#fff",color:period===t.k?"#fff":"#64748b"}}>{t.l}</button>;})}
         </div>
       </div>
 
@@ -853,8 +856,8 @@ function ReportPage({user,reportType,setReportType,accounts}) {
 
       {/* กราฟแท่ง */}
       <div style={{background:"#fff",borderRadius:16,padding:24,marginBottom:24}}>
-        <h3 style={{fontSize:15,fontWeight:700,margin:"0 0 16px",color:"#475569"}}>{period==="7day"?"ยอดขาย 7 วันล่าสุด":"ยอดขายรายเดือน"}</h3>
-        {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>⏳ โหลด...</div>:data.length===0?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>ไม่มีข้อมูล</div>:data.map(function(d){return(
+        <h3 style={{fontSize:15,fontWeight:700,margin:"0 0 16px",color:"#475569"}}>{period==="daily"?"ยอดขายรายวัน":period==="7day"?"ยอดขาย 7 วันล่าสุด":"ยอดขายรายเดือน"}</h3>
+        {loading?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>⏳ โหลด...</div>:data.length===0?<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>ไม่มีข้อมูล</div>:data.slice(0,period==="monthly"?12:30).map(function(d){return(
           <div key={d.date} style={{display:"flex",alignItems:"center",gap:12,marginBottom:8}}>
             <div style={{width:90,fontSize:12,fontWeight:600,color:"#475569",textAlign:"right",flexShrink:0}}>{d.date}</div>
             <div style={{flex:1,height:28,background:"#f1f5f9",borderRadius:8,overflow:"hidden"}}><div style={{height:"100%",width:(d.totalSales/mx)*100+"%",background:"linear-gradient(90deg,#d97706,#f59e0b)",borderRadius:8,minWidth:4}}/></div>
