@@ -181,7 +181,14 @@ function App() {
   }
   async function delAcc(u){try{await api("deleteAccount",{username:u});notify("ลบแล้ว","warning");await loadAccounts();}catch(e){notify("ผิดพลาด","warning");}}
   async function resetPw(u,pw){try{await api("resetPassword",null,{username:u,password:pw});notify("รีเซ็ตรหัสผ่านแล้ว");await loadAccounts();}catch(e){notify("ผิดพลาด","warning");}}
-  async function editAcc(oldUsername,data){try{var r=await api("editAccount",null,{oldUsername:oldUsername,username:data.username,displayName:data.displayName,role:data.role});if(r.success){notify("แก้ไขบัญชีสำเร็จ");await loadAccounts();return true;}else{notify(r.error||"ผิดพลาด","warning");return false;}}catch(e){notify(e.message,"warning");return false;}}
+  async function editAcc(oldUsername,data){try{var r=await api("editAccount",null,{oldUsername:oldUsername,username:data.username,displayName:data.displayName,role:data.role});if(r.success){notify("แก้ไขบัญชีสำเร็จ");await loadAccounts();
+    // ถ้าแก้บัญชีตัวเอง → อัพเดท session ทันที
+    var cur=userRef.current;
+    if(cur&&cur.username===oldUsername){
+      var updated={...cur,username:data.username||cur.username,displayName:data.displayName||cur.displayName,role:data.role||cur.role};
+      userRef.current=updated;setUser(updated);localStorage.setItem("ps_user",JSON.stringify(updated));
+    }
+    return true;}else{notify(r.error||"ผิดพลาด","warning");return false;}}catch(e){notify(e.message,"warning");return false;}}
   async function addProduct(d){try{var r=await api("addProduct",null,d);if(r.success){notify("เพิ่มสินค้า "+d.name);await loadProducts();return true;}else{notify(r.error||"ผิดพลาด","warning");return false;}}catch(e){notify(e.message,"warning");return false;}}
   async function delProduct(name){try{await api("deleteProduct",{name:name});notify("ลบสินค้าแล้ว","warning");await loadProducts();}catch(e){notify("ผิดพลาด","warning");}}
 
