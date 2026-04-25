@@ -96,6 +96,9 @@ function smartParse(t) {
   return r;
 }
 
+/* Helper: ดึงชื่อจริงจาก displayName เช่น "กฤษณกร (ออย)" → "กฤษณกร" */
+function getFirstName(s){ return (s||"").replace(/\s*[\(（].*[\)）]$/,"").trim()||s||""; }
+
 /* ===== MAIN APP ===== */
 function App() {
   var _s = useState; // shorthand
@@ -367,7 +370,7 @@ function OrdersPage({orders,stats,search,setSearch,showForm,setShowForm,onAdd,on
               <td style={{...S.td,fontWeight:600}}>{o.Name}</td>
               <td style={{...S.td,fontSize:12}}>{o.MobileNo}</td>
               <td style={{...S.td,fontSize:12,color:"#64748b"}}>{o.District}</td>
-              <td style={S.td}><span style={{padding:"3px 8px",borderRadius:6,fontSize:11,fontWeight:600,background:"#f0fdf4",color:"#059669"}}>{o.SalesPerson}</span></td>
+              <td style={S.td}><span style={{padding:"3px 8px",borderRadius:6,fontSize:11,fontWeight:600,background:"#f0fdf4",color:"#059669"}}>{getFirstName(o.SalesPerson)}</span></td>
               <td style={{...S.td,fontWeight:700}}>฿{Number(o.SalePrice||0).toLocaleString()}</td>
               <td style={S.td}>฿{Number(o.COD||0).toLocaleString()}</td>
               <td style={{...S.td,textAlign:"center",padding:6}} onClick={function(e){e.stopPropagation();}}>
@@ -732,7 +735,7 @@ function DetailModal({order,onClose,onDel,onUploadSlip,isAdmin}) {
   return (
     <div style={S.modalOverlay} onClick={onClose}>
       <div style={{...S.modalCard,animation:"popIn .2s"}} onClick={function(e){e.stopPropagation();}}>
-        <div style={{display:"flex",justifyContent:"space-between",padding:"24px 28px 16px",borderBottom:"1px solid #f1f5f9"}}><div><h2 style={{fontSize:20,fontWeight:800,margin:0,fontFamily:"'JetBrains Mono',monospace",color:"#d97706"}}>{o.OrderID}</h2><div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>{o.Timestamp} • {o.SalesPerson}</div></div><button onClick={onClose} style={S.closeBtn}>✕</button></div>
+        <div style={{display:"flex",justifyContent:"space-between",padding:"24px 28px 16px",borderBottom:"1px solid #f1f5f9"}}><div><h2 style={{fontSize:20,fontWeight:800,margin:0,fontFamily:"'JetBrains Mono',monospace",color:"#d97706"}}>{o.OrderID}</h2><div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>{o.Timestamp} • {getFirstName(o.SalesPerson)}</div></div><button onClick={onClose} style={S.closeBtn}>✕</button></div>
         <div style={{padding:"20px 28px"}}>
           <Sec t="👤 ลูกค้า"><DR l="ชื่อ" v={o.Name}/><DR l="เบอร์" v={o.MobileNo}/><DR l="ที่อยู่" v={(o.Address||"")+" "+(o.SubDistrict||"")+" "+(o.District||"")+" "+(o.ZIP||"")}/>{o.CustomerFBLine && <DR l="FB/Line" v={o.CustomerFBLine}/>}</Sec>
           <Sec t="💳 การขาย"><DR l="ช่องทาง" v="CRM"/><DR l="ราคา" v={"฿"+Number(o.SalePrice||0).toLocaleString()} hl/><DR l="COD" v={"฿"+Number(o.COD||0).toLocaleString()} hl/><DR l="ประเภท" v={Number(o.COD||0)===0?"💳 โอนเงิน":"📦 เก็บเงินปลายทาง"}/>{o.Remark && <DR l="หมายเหตุ" v={o.Remark}/>}</Sec>
